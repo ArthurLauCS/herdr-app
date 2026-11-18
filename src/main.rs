@@ -8,6 +8,7 @@ mod control;
 mod core_bin;
 mod files;
 mod hc;
+mod highlight;
 mod keys;
 mod layout;
 mod layout_sync;

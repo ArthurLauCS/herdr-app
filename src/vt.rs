@@ -154,8 +154,27 @@ pub struct Cell {
     pub underline_color: Option<Rgb>,
     pub strike: bool,
     pub wide: bool,
+    /// What the program asked for, before the theme, inverse and selection
+    /// turned it into `fg` and `bg`: what the highlighter classifies by.
+    pub src: Src,
     /// Inside the terminal's own selection (its background is the selection color).
     pub selected: bool,
+}
+
+/// A color as the program set it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RawColor {
+    #[default]
+    Default,
+    Palette(u8),
+    Rgb(Rgb),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Src {
+    pub fg: RawColor,
+    pub bg: RawColor,
+    pub inverse: bool,
 }
 
 /// How a cell is underlined (SGR 4, 4:1 to 4:5, 21).
@@ -326,6 +345,16 @@ fn kitty_virtual_cell(x: u16, y: u16, grid_ref: &GhosttyGridRef) -> Option<Kitty
         row: graphemes.get(1).and_then(|c| kitty_placeholder_diacritic_index(*c)),
         col: graphemes.get(2).and_then(|c| kitty_placeholder_diacritic_index(*c)),
     })
+}
+
+fn raw_color(color: GhosttyStyleColor) -> RawColor {
+    unsafe {
+        match color.tag {
+            GHOSTTY_STYLE_COLOR_PALETTE => RawColor::Palette(color.value.palette),
+            GHOSTTY_STYLE_COLOR_RGB => RawColor::Rgb(Rgb::from(color.value.rgb)),
+            _ => RawColor::Default,
+        }
+    }
 }
 
 fn kitty_placeholder_color_to_id(color: GhosttyStyleColor) -> u32 {
@@ -588,6 +617,12 @@ pub struct Vt {
     seen: HashMap<[u64; 2], (Rc<Vec<Cell>>, Option<(u16, u16)>)>,
     /// The width and colors they were read with: a change reads every row.
     seen_with: (u16, u64),
+    /// Bold text in ANSI colors 0-7 draws bright (settings.json `terminal_bold_bright`).
+    bold_bright: bool,
+    /// The settings the highlighter was last matched to.
+    hl_seen: Option<Rc<crate::settings::Settings>>,
+    hl_config: Option<crate::highlight::TerminalHighlights>,
+    hl: Option<crate::highlight::Highlighter>,
     placements_cache: RefCell<Option<Vec<Placement>>>,
     /// Whether the program wants win32 key events (Ghostty doesn't track it).
     pub win32: crate::win32_keys::Win32Input,
@@ -827,6 +862,10 @@ impl Vt {
                 drawn: Default::default(),
                 seen: HashMap::new(),
                 seen_with: (0, 0),
+                bold_bright: true,
+                hl_seen: None,
+                hl_config: None,
+                hl: None,
                 placements_cache: RefCell::new(None),
                 win32: Default::default(),
             };
@@ -842,6 +881,9 @@ impl Vt {
             self.apply_theme();
             // Rows carry the theme's own colors too (the selection's).
             self.seen.clear();
+            // The highlight hues come from the theme.
+            self.hl_config = None;
+            self.hl_seen = None;
         }
     }
 
@@ -1347,6 +1389,112 @@ impl Vt {
         }.or_else(|| self.link_in(&text, &spots, top, at, &mut find, LinkScan::Unresolved))
     }
 
+    /// Follows settings.json: highlighting and bold-in-bright colors.
+    fn sync_highlights(&mut self) {
+        let settings = crate::settings::get();
+        if self.hl_seen.as_ref().is_some_and(|s| Rc::ptr_eq(s, &settings)) {
+            return;
+        }
+        self.hl_seen = Some(settings.clone());
+        if self.bold_bright != settings.terminal_bold_bright {
+            self.bold_bright = settings.terminal_bold_bright;
+            self.seen.clear();
+        }
+        if self.hl_config.as_ref() != Some(&settings.terminal_highlights) {
+            self.hl_config = Some(settings.terminal_highlights.clone());
+            self.hl = crate::highlight::Highlighter::new(&settings.terminal_highlights, &self.theme);
+        }
+    }
+
+    /// Screen row of the viewport's first row.
+    fn viewport_top(&self) -> Option<u32> {
+        unsafe {
+            let r = self.grid_ref(GHOSTTY_POINT_TAG_VIEWPORT, 0, 0)?;
+            let mut p = GhosttyPointCoordinate::default();
+            (ghostty_terminal_point_from_grid_ref(self.term, &r, GHOSTTY_POINT_TAG_SCREEN, &mut p) == GHOSTTY_SUCCESS).then_some(p.y)
+        }
+    }
+
+    /// The text of the first cell of screen row `y`.
+    fn first_text(&self, y: u32) -> Option<String> {
+        let r = self.grid_ref(GHOSTTY_POINT_TAG_SCREEN, 0, y)?;
+        let mut cps = [0u32; 16];
+        let mut len = 0usize;
+        unsafe { ghostty_grid_ref_graphemes(&r, cps.as_mut_ptr(), cps.len(), &mut len) };
+        Some(cps[..len.min(cps.len())].iter().filter_map(|c| char::from_u32(*c)).collect())
+    }
+
+    /// Screen row `y`'s first `max` cells, with what the highlighter classifies by.
+    fn above_row(&self, y: u32, max: u16, full: bool) -> Option<crate::highlight::Above> {
+        let mut r = self.grid_ref(GHOSTTY_POINT_TAG_SCREEN, 0, y)?;
+        let mut cells = Vec::with_capacity(max.min(self.cols) as usize);
+        for x in 0..self.cols.min(max) {
+            r.x = x;
+            unsafe {
+                let mut raw: GhosttyCell = Default::default();
+                ghostty_grid_ref_cell(&r, &mut raw);
+                let mut wide: GhosttyCellWide = GHOSTTY_CELL_WIDE_NARROW;
+                ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &mut wide as *mut _ as *mut c_void);
+                let mut style = GhosttyStyle { size: std::mem::size_of::<GhosttyStyle>(), ..Default::default() };
+                ghostty_grid_ref_style(&r, &mut style);
+                let mut text = String::new();
+                if wide != GHOSTTY_CELL_WIDE_SPACER_TAIL && wide != GHOSTTY_CELL_WIDE_SPACER_HEAD && !style.invisible {
+                    let mut cps = [0u32; 16];
+                    let mut len = 0usize;
+                    ghostty_grid_ref_graphemes(&r, cps.as_mut_ptr(), cps.len(), &mut len);
+                    text.extend(cps[..len.min(cps.len())].iter().filter_map(|c| char::from_u32(*c)));
+                }
+                cells.push(Cell {
+                    text,
+                    bold: style.bold,
+                    faint: style.faint,
+                    wide: wide == GHOSTTY_CELL_WIDE_WIDE,
+                    src: Src { fg: raw_color(style.fg_color), bg: raw_color(style.bg_color), inverse: style.inverse },
+                    ..Default::default()
+                });
+            }
+        }
+        Some(crate::highlight::Above { cells, wrapped: y > 0 && self.wraps(y - 1), full })
+    }
+
+    /// The rows above the viewport that what is drawn depends on: the head of a logical line that
+    /// starts above it, and the Claude Code block its first rows belong to (a tool call's output
+    /// can start screens up).
+    fn above_rows(&self, blocks: bool) -> Vec<crate::highlight::Above> {
+        // A held frame is older than the terminal: its rows no longer sit where the terminal says.
+        if self.shared.held_since.is_some() {
+            return Vec::new();
+        }
+        // A tool's output can start above the viewport; look this far up for its call line.
+        const MAX_BLOCK_LOOKBACK: u32 = 300;
+        // Past a name and its call, a row is only told apart by what its first cells hold.
+        const BLOCK_COLUMNS: u16 = 44;
+        const MAX_WRAPPED_ROWS: u32 = 8;
+        let Some(top) = self.viewport_top().filter(|t| *t > 0) else { return Vec::new() };
+        let mut head = top;
+        while top - head < MAX_WRAPPED_ROWS && head > 0 && self.wraps(head - 1) {
+            head -= 1;
+        }
+        let mut start = head;
+        if blocks {
+            // The bullet line of the block that reaches `head`; replies span blank lines, any other
+            // unindented line ends a block.
+            for y in (head.saturating_sub(MAX_BLOCK_LOOKBACK)..head).rev() {
+                let Some(first) = self.first_text(y) else { break };
+                if first.starts_with('\u{25cf}') {
+                    start = y;
+                    break;
+                }
+                if !(first.is_empty() || first.starts_with(' ') || y > 0 && self.wraps(y - 1)) {
+                    break;
+                }
+            }
+        }
+        let mut rows: Vec<_> = (start..head).filter_map(|y| self.above_row(y, BLOCK_COLUMNS, false)).collect();
+        rows.extend((head..top).filter_map(|y| self.above_row(y, self.cols, true)));
+        rows
+    }
+
     /// Whether the terminal wrapped screen row `y` onto the next.
     fn wraps(&self, y: u32) -> bool {
         unsafe {
@@ -1751,6 +1899,7 @@ impl Vt {
                 ghostty_terminal_set(self.term, GHOSTTY_TERMINAL_OPT_MODE, &cfg as *const _ as *const c_void);
                 self.shared.held_since = None;
             }
+            self.sync_highlights();
             let state = self.shared.state;
             if self.shared.held_since.is_none() {
                 ghostty_render_state_update(state, self.term);
@@ -1770,6 +1919,8 @@ impl Vt {
             let all = dirty == GHOSTTY_RENDER_STATE_DIRTY_FULL || with != self.seen_with;
             let mut seen = HashMap::with_capacity(self.rows as usize);
             let mut rows = Vec::with_capacity(self.rows as usize);
+            let mut wraps: Vec<bool> = Vec::new();
+            let mut hl = self.hl.take();
             ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &mut self.rows_it as *mut _ as *mut c_void);
             while ghostty_render_state_row_iterator_next(self.rows_it) {
                 let mut sel = GhosttyRenderStateRowSelection { size: std::mem::size_of::<GhosttyRenderStateRowSelection>(), ..Default::default() };
@@ -1800,9 +1951,21 @@ impl Vt {
                 if known {
                     seen.insert(id.bits, (row.clone(), selection));
                 }
+                if hl.is_some() {
+                    let mut raw: GhosttyRow = Default::default();
+                    let mut continued = false;
+                    ghostty_render_state_row_get(self.rows_it, GHOSTTY_RENDER_STATE_ROW_DATA_RAW, &mut raw as *mut _ as *mut c_void);
+                    ghostty_row_get(raw, GHOSTTY_ROW_DATA_WRAP_CONTINUATION, &mut continued as *mut _ as *mut c_void);
+                    wraps.push(continued);
+                }
                 rows.push(row);
             }
             (self.seen, self.seen_with) = (seen, with);
+            if let Some(h) = hl.as_mut() {
+                let above = self.above_rows(h.wants_blocks());
+                rows = h.decorate(&above, &rows, &wraps);
+            }
+            self.hl = hl;
 
             let mut cur = GhosttyRenderStateCursor { size: std::mem::size_of::<GhosttyRenderStateCursor>(), ..Default::default() };
             ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_CURSOR, &mut cur as *mut _ as *mut c_void);
@@ -1850,6 +2013,11 @@ impl Vt {
                 .then(|| Rgb::from(bg));
 
             let (mut fg, mut bg) = (fg, bg);
+            let src = Src { fg: raw_color(style.fg_color), bg: raw_color(style.bg_color), inverse: style.inverse };
+            // Bold text in ANSI colors 0-7 draws with the bright 8-15.
+            if self.bold_bright && style.bold && let RawColor::Palette(i @ 0..=7) = src.fg {
+                fg = Rgb::from(palette[usize::from(i) + 8]);
+            }
             if style.inverse {
                 let new_fg = bg.unwrap_or(self.theme.bg);
                 bg = Some(fg);
@@ -1907,6 +2075,7 @@ impl Vt {
                 underline_color,
                 strike: style.strikethrough,
                 wide: wide == GHOSTTY_CELL_WIDE_WIDE,
+                src,
                 selected,
             }
         }
@@ -2262,7 +2431,8 @@ mod tests {
         let first: String = f.rows[0].iter().map(|c| c.text.as_str()).collect();
         assert!(first.starts_with("hi red"), "{first:?}");
         assert!(f.rows[0][3].bold);
-        assert_eq!(f.rows[0][3].fg, theme().palette16[1]);
+        // Bold text in ANSI colors 0-7 draws bright by default.
+        assert_eq!(f.rows[0][3].fg, theme().palette16[9]);
         assert!(f.rows[1][0].wide);
         assert_eq!(f.rows[1][0].text, "中");
         assert_eq!(f.rows[1][1].text, "");
