@@ -2054,16 +2054,12 @@ fn row_ops_on(row: &[vt::Cell], terminal_bg: Option<vt::Rgb>, cell: Size<Pixels>
         if ligatures && needs_ligatures(&text, &text_font) {
             text_font.features = ligature_features(true);
         }
-        let run = TextRun {
-            len: text.len(),
-            font: text_font,
-            color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
+        let runs: Vec<TextRun> = run_colors(&row[start..x], terminal_bg)
+            .into_iter()
+            .map(|(len, color)| TextRun { len, font: text_font.clone(), color, background_color: None, underline: None, strikethrough: None })
+            .collect();
         let width = cell.width * if c.wide { 2.0 } else { (x - start) as f32 };
-        let line = window.text_system().shape_line(text.into(), fitted_size.unwrap_or_else(|| px(crate::settings::font_size())), &[run], None)
+        let line = window.text_system().shape_line(text.into(), fitted_size.unwrap_or_else(|| px(crate::settings::font_size())), &runs, None)
             .with_cell_positions(&positions, width);
         ops.push(RowOp::Text { x: start, line });
     }
@@ -2072,6 +2068,22 @@ fn row_ops_on(row: &[vt::Cell], terminal_bg: Option<vt::Rgb>, cell: Size<Pixels>
 }
 
 const FAINT_ALPHA: f32 = 0.6;
+
+/// The colors along one shaped run of `cells`, as (bytes, color). A cell's color depends on its
+/// background too (vt::legible), and one run can cross a selection's edge or a painted band.
+/// A blank cell draws nothing and takes its neighbour's color.
+fn run_colors(cells: &[vt::Cell], terminal_bg: Option<vt::Rgb>) -> Vec<(usize, Hsla)> {
+    let mut colors: Vec<(usize, Hsla)> = Vec::new();
+    for d in cells {
+        let len = if d.text.is_empty() { 1 } else { d.text.len() };
+        match colors.last_mut() {
+            Some(last) if d.text.trim().is_empty() => last.0 += len,
+            Some(last) if last.1 == cell_color(d, terminal_bg) => last.0 += len,
+            _ => colors.push((len, cell_color(d, terminal_bg))),
+        }
+    }
+    colors
+}
 
 /// A cell's text color, dimmed when faint; on a painted background where it
 /// would be hard to read (a selection), a readable color instead (vt::legible).
@@ -3976,6 +3988,23 @@ mod tests {
                 }
             }
         }).unwrap();
+    }
+
+    #[test]
+    fn a_text_run_changes_color_where_its_cells_read_differently() {
+        use super::*;
+        use vt::Rgb;
+        // Blue text, half of it under a selection in its own color: that half is redrawn to be seen.
+        let blue = Rgb(0x89, 0xb4, 0xfa);
+        let cell = |text: &str, selected: bool| vt::Cell { text: text.into(), fg: blue, bg: selected.then_some(blue), selected, ..Default::default() };
+        let colors = run_colors(&[cell("a", true), cell("b", true), cell("c", false), cell("d", false)], None);
+        assert_eq!(colors.iter().map(|(len, _)| *len).collect::<Vec<_>>(), vec![2, 2]);
+        assert_ne!(colors[0].1, hsla(blue));
+        assert_eq!(colors[1].1, hsla(blue));
+        // One color across a background change that leaves the text readable, and across blanks.
+        let (text, gray) = (Rgb(0xcd, 0xd6, 0xf4), Rgb(0x45, 0x47, 0x5a));
+        let row = [vt::Cell { text: "a".into(), fg: text, bg: Some(gray), selected: true, ..Default::default() }, vt::Cell { fg: text, ..Default::default() }, vt::Cell { text: "中".into(), fg: text, ..Default::default() }];
+        assert_eq!(run_colors(&row, None), vec![(5, hsla(text))]);
     }
 
     #[gpui::test]

@@ -85,7 +85,28 @@ pub fn legible(c: &Cell, faint_alpha: f32, default_bg: Option<Rgb>) -> Option<Rg
     } else {
         here < PAINTED_CONTRAST && default_bg.is_none_or(|d| here < seen_on(d) * PAINTED_KEEPS)
     };
-    hidden.then(|| readable(c.fg, bg, f32::INFINITY))
+    hidden.then(|| lift(c.fg, bg, SELECTED_CONTRAST))
+}
+
+/// `fg` moved toward near-white or near-black, whichever `bg` sets off better, just far enough
+/// to reach `target` contrast on it: red text stays reddish under a selection.
+fn lift(fg: Rgb, bg: Rgb, target: f32) -> Rgb {
+    let (light, dark) = (Rgb(0xf2, 0xf2, 0xf4), Rgb(0x1b, 0x1b, 0x1e));
+    let end = if contrast(light, bg) >= contrast(dark, bg) { light } else { dark };
+    let toward = |t: f32| {
+        let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+        Rgb(m(fg.0, end.0), m(fg.1, end.1), m(fg.2, end.2))
+    };
+    if contrast(end, bg) <= target {
+        return end;
+    }
+    // Contrast first falls (where fg crosses bg's lightness) then rises: the first t that reaches the target.
+    let (mut lo, mut hi) = (0.0_f32, 1.0_f32);
+    for _ in 0..12 {
+        let mid = (lo + hi) / 2.0;
+        if contrast(toward(mid), bg) >= target { hi = mid } else { lo = mid }
+    }
+    toward(hi)
 }
 
 /// `fg`, or near-white / near-black when it would vanish into `bg`.
@@ -2288,12 +2309,18 @@ mod tests {
         let (default_bg, text, blue, dim, subtle) = (hex(0x1e1e2e), hex(0xcdd6f4), hex(0x89b4fa), hex(0x7f849c), hex(0x585b70));
         let cell = |fg: Rgb, bg: Option<Rgb>| Cell { text: "a".into(), fg, bg, ..Default::default() };
         let check = |c: &Cell| legible(c, 0.6, Some(default_bg));
-        let dark = Rgb(0x1b, 0x1b, 0x1e);
-        let light = Rgb(0xf2, 0xf2, 0xf4);
+        let sum = |c: Rgb| u32::from(c.0) + u32::from(c.1) + u32::from(c.2);
+        // Redrawn to be read on its background, darker or lighter than it.
+        let redrawn = |c: &Cell, darker: bool| {
+            let (fg, bg) = (check(c).expect("redrawn"), c.bg.unwrap());
+            assert!(contrast(fg, bg) >= SELECTED_CONTRAST, "{fg:?} on {bg:?}");
+            assert_eq!(sum(fg) < sum(bg), darker, "{fg:?} on {bg:?}");
+            fg
+        };
         // An agent's own selection in ANSI blue: its text and its inline code (also blue).
-        assert_eq!(check(&cell(text, Some(blue))), Some(dark));
-        assert_eq!(check(&cell(blue, Some(blue))), Some(dark));
-        assert_eq!(check(&Cell { faint: true, ..cell(dim, Some(blue)) }), Some(dark));
+        redrawn(&cell(text, Some(blue)), true);
+        redrawn(&cell(blue, Some(blue)), true);
+        redrawn(&Cell { faint: true, ..cell(dim, Some(blue)) }, true);
         // Not painted: dim stays dim.
         assert_eq!(check(&cell(subtle, None)), None);
         // A dark band the program drew behind dim text is its design.
@@ -2303,16 +2330,22 @@ mod tests {
         let sel = |fg: Rgb| Cell { selected: true, ..cell(fg, Some(hex(0x45475a))) };
         assert_eq!(check(&sel(text)), None);
         assert_eq!(check(&sel(hex(0xf9e2af))), None);
-        assert_eq!(check(&sel(dim)), Some(light));
-        assert_eq!(check(&sel(subtle)), Some(light));
-        assert_eq!(check(&Cell { faint: true, ..sel(text) }), Some(light));
+        redrawn(&sel(dim), false);
+        redrawn(&sel(subtle), false);
+        redrawn(&Cell { faint: true, ..sel(text) }, false);
+        // Colored text keeps its hue: red stays reddish, only lighter.
+        let red = redrawn(&sel(hex(0xf38ba8)), false);
+        assert!(red.0 > red.2 && red.0 > red.1, "{red:?}");
+        assert_ne!(red, Rgb(0xf2, 0xf2, 0xf4));
         // Graphics keep their colors (powerline arrows are drawn in the next segment's background).
         assert_eq!(check(&Cell { text: "\u{e0b0}".into(), ..cell(blue, Some(blue)) }), None);
         assert_eq!(check(&Cell { text: "\u{2588}".into(), ..cell(blue, Some(blue)) }), None);
         // Blank cells draw no text.
         assert_eq!(check(&Cell { text: String::new(), ..cell(blue, Some(blue)) }), None);
         // Without the terminal's background, the plain threshold decides.
-        assert_eq!(legible(&cell(subtle, Some(hex(0x2a2b3d))), 0.6, None), Some(light));
+        let band = hex(0x2a2b3d);
+        let fg = legible(&cell(subtle, Some(band)), 0.6, None).expect("redrawn");
+        assert!(contrast(fg, band) >= SELECTED_CONTRAST && sum(fg) > sum(band));
     }
 
     #[test]
