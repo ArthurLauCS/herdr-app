@@ -1,6 +1,7 @@
 // Windows: a window app, but tests inherit Cargo's console for their child processes.
 #![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
+mod attention;
 mod badge;
 mod bench;
 mod commands;

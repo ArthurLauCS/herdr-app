@@ -2372,6 +2372,7 @@ impl AppWindow {
             model::Alert::Blocked => (format!("{name} needs you"), "error"),
             model::Alert::Done => (format!("{name} finished"), "info"),
         };
+        crate::attention::alert(window, self.window_active, crate::attention::Alert { title: &title, body: place.as_deref(), terminal: addr });
         let notification = json!({
             "title": title, "body": place, "level": level,
             "action": { "name": "agent.focus", "args": { "terminal": addr } },
@@ -4299,6 +4300,7 @@ impl AppWindow {
         if active != self.window_active {
             self.window_active = active;
             if active {
+                crate::attention::window_activated();
                 self.sync(window, cx);
             } else {
                 self.looked.clear();
