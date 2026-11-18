@@ -679,3 +679,42 @@ fn settings_defaults_are_the_users_values_and_round_trip() {
     assert_eq!(serde_json::from_str::<settings::Person>(&serde_json::to_string(&person).unwrap()).unwrap(), person);
     assert!(serde_json::from_str::<settings::Person>(r#"{"terminal_highlights": {"claude_blocks": "loud"}}"#).is_err());
 }
+
+#[test]
+fn the_prompt_echo_band_reaches_the_cells_an_erase_filled() {
+    // Claude Code ends the echo row with "erase to end of line" under the background: those cells
+    // carry the color in the cell itself, not in a style.
+    let input = lines(&["\x1b[100m❯ fix\x1b[K\x1b[49m", "next"]);
+    let band = some(hx("232323"));
+    assert_eq!(marks(20, 2, blocks_only(ClaudeBlocks::Tags), &input), [(0, 0, 1, some(BLUE), band), (0, 1, 19, None, band)]);
+}
+
+/// `cargo test --release frame_cost -- --ignored --nocapture`: what highlighting adds to a frame.
+#[test]
+#[ignore]
+fn frame_cost() {
+    let line = "  - error: build failed in src/vt.rs:120 after 56.9 s, 3,590,582 rows, fixes #1203 (https://github.com/a/b)";
+    let time_with = |hl: TerminalHighlights, scroll: bool, fresh: bool| {
+        let mut vt = terminal(200, 50, hl, true, dark(), "");
+        let screen = (0..60).map(|i| format!("{line} {i}")).collect::<Vec<_>>().join("\r\n");
+        vt.write(screen.as_bytes());
+        vt.frame();
+        let start = std::time::Instant::now();
+        let n = 200;
+        for i in 0..n {
+            if scroll {
+                vt.write(format!("\r\n{line} {i}").as_bytes());
+            } else {
+                vt.write(format!("\x1b[50;1H\x1b[2Kspinner {} {line}", if fresh { i } else { 0 }).as_bytes());
+            }
+            vt.frame();
+        }
+        start.elapsed() / n
+    };
+    let time = |hl: TerminalHighlights, scroll: bool| time_with(hl, scroll, true);
+    let off = TerminalHighlights { enabled: false, ..Default::default() };
+    println!("scrolling output, per frame: off {:?}, on {:?}", time(off.clone(), true), time(TerminalHighlights::default(), true));
+    println!("one row changing, per frame: off {:?}, on {:?}", time(off.clone(), false), time(TerminalHighlights::default(), false));
+    println!("one row redrawn the same, per frame: off {:?}, on {:?}", time_with(off, false, false), time_with(TerminalHighlights::default(), false, false));
+    println!("  of which text rules only: {:?}, blocks only: {:?}", time_with(text_only(), false, false), time_with(blocks_only(ClaudeBlocks::Tags), false, false));
+}

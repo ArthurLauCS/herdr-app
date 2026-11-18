@@ -15,7 +15,7 @@ mod rules;
 use crate::vt::{Cell, Rgb, Theme};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 use std::rc::Rc;
 
 pub use rules::preset_ids;
@@ -179,12 +179,30 @@ struct Drawn {
 const MAX_WRAPPED_ROWS: usize = 8;
 const MAX_CACHED_LINES: usize = 4096;
 
+/// A quick hash for the text of a line: it runs over every cell of every changed row.
+struct Fx(u64);
+
+impl Hasher for Fx {
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(*b)).wrapping_mul(0x517c_c1b7_2722_0a95);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
 pub struct Highlighter {
     rules: Vec<rules::Rule>,
     claude: Option<Style>,
     palette: Palette,
     /// Hits by the hash of a logical line's text and which of it is plain.
     cache: HashMap<u64, Rc<Vec<rules::Hit>>>,
+    /// The logical lines of last frame's viewport, by their first row, with the rows they were
+    /// matched from: rows kept by the terminal need no hashing to be found again.
+    lines: HashMap<*const Vec<Cell>, (Vec<Rc<Vec<Cell>>>, Rc<Vec<rules::Hit>>)>,
     /// Each viewport row as drawn last frame.
     drawn: Vec<Option<Drawn>>,
 }
@@ -204,7 +222,7 @@ impl Highlighter {
         if rules.is_empty() && claude.is_none() {
             return None;
         }
-        Some(Highlighter { rules, claude, palette: Palette::new(theme), cache: HashMap::new(), drawn: Vec::new() })
+        Some(Highlighter { rules, claude, palette: Palette::new(theme), cache: HashMap::new(), lines: HashMap::new(), drawn: Vec::new() })
     }
 
     /// Whether the Claude blocks look at rows above the viewport.
@@ -215,12 +233,12 @@ impl Highlighter {
     fn line_hits(&mut self, lines: &[&[Cell]]) -> Rc<Vec<rules::Hit>> {
         let fg = self.palette.fg;
         let plain = move |c: &Cell| claude::is_plain(c, fg);
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut h = Fx(0);
         for line in lines {
-            line.len().hash(&mut h);
+            h.write_usize(line.len());
             for c in line.iter() {
-                c.text.hash(&mut h);
-                (plain(c), c.faint, c.wide).hash(&mut h);
+                h.write(c.text.as_bytes());
+                h.write_u8(u8::from(plain(c)) | u8::from(c.faint) << 1 | u8::from(c.wide) << 2 | 0x80);
             }
         }
         let key = h.finish();
@@ -247,6 +265,7 @@ impl Highlighter {
         let mut marks: Vec<Vec<Mark>> = vec![Vec::new(); rows.len()];
 
         if !self.rules.is_empty() {
+            let mut last_frame = std::mem::take(&mut self.lines);
             let mut i = 0;
             while i < views.len() {
                 let mut j = i + 1;
@@ -255,8 +274,20 @@ impl Highlighter {
                 }
                 let readable = (i..j).all(|k| k >= n || above[k].full);
                 if j > n && readable {
-                    let lines: Vec<&[Cell]> = views[i..j].iter().map(|r| r.cells).collect();
-                    let hits = self.line_hits(&lines);
+                    let hits = if i >= n {
+                        let kept = &rows[i - n..j - n];
+                        let key = Rc::as_ptr(&kept[0]);
+                        let same = last_frame.remove(&key).filter(|(prev, _)| prev.len() == kept.len() && prev.iter().zip(kept).all(|(a, b)| Rc::ptr_eq(a, b)));
+                        let (_, hits) = same.unwrap_or_else(|| {
+                            let lines: Vec<&[Cell]> = kept.iter().map(|r| r.as_slice()).collect();
+                            (Vec::new(), self.line_hits(&lines))
+                        });
+                        self.lines.insert(key, (kept.to_vec(), hits.clone()));
+                        hits
+                    } else {
+                        let lines: Vec<&[Cell]> = views[i..j].iter().map(|r| r.cells).collect();
+                        self.line_hits(&lines)
+                    };
                     for hit in hits.iter().filter(|h| i + h.row >= n) {
                         let hue = self.palette.hue(hit.hue);
                         let fg = if hit.subtle { mix(hue, self.palette.fg, 0.5) } else { hue };

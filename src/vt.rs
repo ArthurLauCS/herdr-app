@@ -357,6 +357,27 @@ fn raw_color(color: GhosttyStyleColor) -> RawColor {
     }
 }
 
+/// The background a cell was given: by its style, or by an erase that left the color in the cell itself.
+unsafe fn bg_src(raw: GhosttyCell, style: &GhosttyStyle) -> RawColor {
+    unsafe {
+        let mut tag: GhosttyCellContentTag = 0;
+        ghostty_cell_get(raw, GHOSTTY_CELL_DATA_CONTENT_TAG, &mut tag as *mut _ as *mut c_void);
+        match tag {
+            GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE => {
+                let mut i: GhosttyColorPaletteIndex = 0;
+                ghostty_cell_get(raw, GHOSTTY_CELL_DATA_COLOR_PALETTE, &mut i as *mut _ as *mut c_void);
+                RawColor::Palette(i)
+            }
+            GHOSTTY_CELL_CONTENT_BG_COLOR_RGB => {
+                let mut c = GhosttyColorRgb::default();
+                ghostty_cell_get(raw, GHOSTTY_CELL_DATA_COLOR_RGB, &mut c as *mut _ as *mut c_void);
+                RawColor::Rgb(Rgb::from(c))
+            }
+            _ => raw_color(style.bg_color),
+        }
+    }
+}
+
 fn kitty_placeholder_color_to_id(color: GhosttyStyleColor) -> u32 {
     unsafe {
         match color.tag {
@@ -1449,7 +1470,7 @@ impl Vt {
                     bold: style.bold,
                     faint: style.faint,
                     wide: wide == GHOSTTY_CELL_WIDE_WIDE,
-                    src: Src { fg: raw_color(style.fg_color), bg: raw_color(style.bg_color), inverse: style.inverse },
+                    src: Src { fg: raw_color(style.fg_color), bg: bg_src(raw, &style), inverse: style.inverse },
                     ..Default::default()
                 });
             }
@@ -2013,7 +2034,7 @@ impl Vt {
                 .then(|| Rgb::from(bg));
 
             let (mut fg, mut bg) = (fg, bg);
-            let src = Src { fg: raw_color(style.fg_color), bg: raw_color(style.bg_color), inverse: style.inverse };
+            let src = Src { fg: raw_color(style.fg_color), bg: bg_src(raw, &style), inverse: style.inverse };
             // Bold text in ANSI colors 0-7 draws with the bright 8-15.
             if self.bold_bright && style.bold && let RawColor::Palette(i @ 0..=7) = src.fg {
                 fg = Rgb::from(palette[usize::from(i) + 8]);
