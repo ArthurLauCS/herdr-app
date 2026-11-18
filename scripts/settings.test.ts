@@ -8,6 +8,7 @@ const disk: { raw: string | null; writes: number; fail?: string; readFail?: stri
 const values: Record<string, any> = {
   View: class {},
   appHome: () => "/home",
+  tr: (s: string, v?: Record<string, any>) => s.replace(/\{(\w+)\}/g, (m, k) => (v && k in v ? v[k] : m)),
   notify: (n: any) => { disk.toasts.push(n); },
   readTextFile: async () => {
     if (disk.readFail) throw new Error(disk.readFail);

@@ -24,6 +24,13 @@ export function appHome(): string;
  *  (exec and writeTextFile included), so guard process side effects. */
 export function checking(): boolean;
 
+/** Text in the interface language (settings.json `language`; Settings > Language).
+ *  Wrap every user-visible string: `tr("Delete this tab?")`, `tr("{name} needs you", { name })`.
+ *  The English text is the key: it is what shows for `en` or when the language has no entry.
+ *  `{name}` placeholders are filled from `vars`. Call it where the text is drawn (in `render`),
+ *  not once at load, so a language change shows live. */
+export function tr(text: string, vars?: Record<string, string | number>): string;
+
 /** Reads UTF-8 text (up to 1 MiB), or null if absent. Runs off the UI thread.
  *  `on`: from that machine (a space's `machine`). */
 export function readTextFile(path: string, options?: { on?: string | null }): Promise<string | null>;

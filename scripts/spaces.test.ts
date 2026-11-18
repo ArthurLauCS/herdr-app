@@ -1,3 +1,5 @@
+// The host's tr(): the English text with {name} placeholders filled.
+(globalThis as any).tr = (s: string, v?: Record<string, unknown>) => s.replace(/\{(\w+)\}/g, (m, k) => (v && k in v ? String(v[k]) : m));
 import { test, expect, spyOn } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";

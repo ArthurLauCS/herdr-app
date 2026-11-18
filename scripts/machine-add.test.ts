@@ -16,6 +16,7 @@ function setup(result: any) {
     View: class {}, div() {}, svg() {}, TextView: {}, v_flex() {}, h_flex() {},
     InputState: { new: () => ({ on() {}, focus() {}, set_value() {} }) }, Input: {},
     home: () => "/home/test", readTextFile: async () => null,
+    tr: (s: string, v?: Record<string, any>) => Object.entries(v ?? {}).reduce((a, [k, x]) => a.split("{" + k + "}").join(String(x)), s),
     theme() {}, props: () => ({}), closeOverlay() {},
     openOverlay: (...args: unknown[]) => overlays.push(args),
     exec: async (_cmd: string, _args: string[], options: any) => {
@@ -139,6 +140,7 @@ async function hostsUnder(prefix: string) {
     const values = {
       View: class {}, div() {}, svg() {}, TextView: {}, v_flex() {}, h_flex() {}, InputState: {}, Input: {},
       hc() {}, theme() {}, props: () => ({}), closeOverlay() {}, openOverlay() {},
+    tr: (s: string, v?: Record<string, any>) => Object.entries(v ?? {}).reduce((a, [k, x]) => a.split("{" + k + "}").join(String(x)), s),
       home: () => home,
       readTextFile: (file: string) => readFile(file, "utf8"),
       exec: async (program: string, args: string[]) => {

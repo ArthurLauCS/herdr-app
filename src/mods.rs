@@ -1009,6 +1009,12 @@ fn exec_future(command: String, args: Vec<String>, cwd: Option<String>, on: Opti
     }
 }
 
+/// `tr(text, vars)` for mods: the text in the interface language, `{name}`s filled from `vars`.
+pub(crate) fn translate(text: &str, vars: Value) -> String {
+    let args = vars.as_object().into_iter().flatten().map(|(k, v)| (k.clone(), v.as_str().map_or_else(|| v.to_string(), str::to_owned)));
+    crate::i18n::fill(&crate::i18n::tr(text), args)
+}
+
 fn module(inst: Instance, copy: u64) -> HostModule {
     let reads = Rc::new(RefCell::new(LiveReads::default()));
     LIVE_READS.with_borrow_mut(|copies| {
@@ -1050,6 +1056,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
             Ok(exec_future("hc".into(), strings(a.get(0)), None, None, EXEC_LIMIT))
         })
         .function("checking", |_| Ok(HostValue::Bool(checking())))
+        .function("tr", |a| Ok(translate(a.string(0)?, a.get(1).map(from_host).unwrap_or(Value::Null)).into()))
         .function("home", |_| Ok(home().to_string_lossy().into_owned().into()))
         .function("appHome", |_| Ok(app_dir().to_string_lossy().into_owned().into()))
         .function("fonts", |_| Ok(to_host(&json!(*FONTS.lock().unwrap()))))
@@ -1189,7 +1196,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
                 .iter()
                 .map(|c| {
                     let args: Vec<Value> = c.args.iter().map(|a| json!({ "name": a.name, "required": a.required })).collect();
-                    json!({ "name": c.name, "args": args, "about": c.about })
+                    json!({ "name": c.name, "args": args, "about": crate::i18n::tr(c.about) })
                 })
                 .collect();
             Ok(to_host(&Value::Array(list)))

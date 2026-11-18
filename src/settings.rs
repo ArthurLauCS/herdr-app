@@ -412,6 +412,9 @@ pub struct Person {
     /// Light or dark: the system's, or one always.
     #[serde(skip_serializing_if = "Appearance::is_system")]
     pub appearance: Appearance,
+    /// The interface language: `auto` (the system's), `en`, `zh-CN` (i18n.rs).
+    #[serde(skip_serializing_if = "is_auto")]
+    pub language: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<crate::layout::ThemeChoice>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -454,6 +457,10 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+fn is_auto(s: &String) -> bool {
+    s == "auto"
+}
+
 impl Default for Person {
     fn default() -> Self {
         Person {
@@ -475,6 +482,7 @@ impl Default for Person {
             minimum_contrast: 1.0,
             option_as_alt: OptionAsAlt::Auto,
             appearance: Appearance::System,
+            language: "auto".into(),
             theme: None,
             colors: BTreeMap::new(),
         }
@@ -508,6 +516,8 @@ pub struct Settings {
     pub theme_dark: String,
     /// Whether the window is dark now (the person's `appearance`, else the system's).
     pub dark: bool,
+    /// The interface language setting (`auto`, `en`, `zh-CN`).
+    pub language: String,
     /// Any theme color by name (see `theme()` in herdr.d.ts), `#rrggbb` or `#rrggbbaa`.
     pub colors: BTreeMap<String, String>,
     /// A draggable scroll position thumb at a terminal pane's right edge.
@@ -559,6 +569,7 @@ impl Default for Settings {
             theme_light: DEFAULT_LIGHT.into(),
             theme_dark: DEFAULT_DARK.into(),
             dark: true,
+            language: "auto".into(),
             colors: BTreeMap::new(),
             pane_scrollbars: true,
             terminal_padding: [10.0, 6.0],
@@ -602,6 +613,7 @@ impl Settings {
             theme_light,
             theme_dark,
             dark,
+            language: person.language.clone(),
             colors,
             pane_scrollbars: person.pane_scrollbars,
             terminal_padding: look.terminal_padding.unwrap_or(d.terminal_padding),
@@ -760,6 +772,7 @@ pub fn set(s: Settings) -> bool {
         OptionAsAlt::Left => Some(gpui_macos::OptionAsAlt::Left),
         OptionAsAlt::Right => Some(gpui_macos::OptionAsAlt::Right),
     });
+    crate::i18n::set_language(&s.language);
     CURRENT.with(|c| {
         // Read the theme even when the settings are the same: its file may
         // have new colors under the same name.
@@ -1080,7 +1093,7 @@ mod tests {
     /// settings.json key.
     #[test]
     fn the_guide_explains_every_setting() {
-        let all = Person { core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), font_weight: Some(400), ui_font: Some(String::new()), telemetry: false, clipboard_write: false, copy_on_select: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
+        let all = Person { core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), font_weight: Some(400), ui_font: Some(String::new()), telemetry: false, clipboard_write: false, copy_on_select: false, appearance: Appearance::Light, language: "zh-CN".into(), theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
         let keys: Vec<String> = serde_json::to_value(&all).unwrap().as_object().unwrap().keys().cloned().collect();
         let guide = include_str!("../defaults/AGENTS.md");
         let section = guide.split("## The person").nth(1).and_then(|s| s.split("\n## ").next()).unwrap_or_default();

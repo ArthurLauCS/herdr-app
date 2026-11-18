@@ -8,6 +8,7 @@ mod control;
 mod core_bin;
 mod files;
 mod hc;
+mod i18n;
 mod keys;
 mod layout;
 mod layout_sync;
@@ -154,6 +155,7 @@ fn main() {
     let fresh = !settings::path().exists();
     // The core people installed; without one, the setup screen installs it.
     let person = settings::load_person();
+    i18n::set_language(person.as_ref().map_or("auto", |p| p.language.as_str()));
     let configured = person.as_ref().ok().and_then(|p| p.core.clone());
     let core: Result<std::sync::Arc<hc::Core>, setup::Need> = match core_bin::find(configured.as_deref()) {
         None => Err(setup::Need::Install),

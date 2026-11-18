@@ -144,7 +144,7 @@ impl AppWindow {
                 .bg(c("popover"))
                 .text_xs()
                 .text_color(c("blocked"))
-                .child(format!("{} did not load: {e}", inst.name))
+                .child(tr_fmt("{name} did not load: {error}", &[("name", &inst.name), ("error", e)]))
                 .into_any_element(),
             _ => div().into_any_element(),
         };
