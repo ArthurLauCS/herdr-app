@@ -125,7 +125,8 @@ fn checks_app() -> Option<PathBuf> {
 
 /// A release build checks the core; a source build only when pointed at a test release server.
 fn checks_core() -> bool {
-    option_env!("HERDR_APP_RELEASE").is_some() || std::env::var_os("HERDR_RELEASES_URL").is_some()
+    // LOCAL PATCH: the custom build (local_custom.rs) keeps its core current too.
+    option_env!("HERDR_APP_RELEASE").is_some() || std::env::var_os("HERDR_RELEASES_URL").is_some() || crate::local_custom::active()
 }
 
 /// For the settings screen: both programs, what's waiting, when we last looked.
