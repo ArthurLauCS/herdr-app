@@ -1967,7 +1967,13 @@ enum RowOp {
 /// A row's drawing: its backgrounds, merged into runs of one color, then its
 /// text in runs of one style (wide characters, sprites and icons on their own),
 /// then its underlines and strikethroughs.
+#[cfg(test)]
 fn row_ops(row: &[vt::Cell], cell: Size<Pixels>, cursor: Option<usize>, window: &mut Window) -> Vec<RowOp> {
+    row_ops_on(row, None, cell, cursor, window)
+}
+
+/// `terminal_bg`: the terminal's own background (vt::legible measures painted ones against it).
+fn row_ops_on(row: &[vt::Cell], terminal_bg: Option<vt::Rgb>, cell: Size<Pixels>, cursor: Option<usize>, window: &mut Window) -> Vec<RowOp> {
     crate::bench::count(&crate::bench::ROWS);
     let ligatures = crate::settings::get().font_ligatures;
     let mut ops = Vec::new();
@@ -1993,7 +1999,7 @@ fn row_ops(row: &[vt::Cell], cell: Size<Pixels>, cursor: Option<usize>, window: 
         if c.text.is_empty() && c.underline.is_none() && !c.strike {
             continue;
         }
-        let color = cell_color(c);
+        let color = cell_color(c, terminal_bg);
         if crate::sprites::is_sprite(&c.text) {
             ops.push(RowOp::Sprite { x: start, text: c.text.clone(), color });
             continue;
@@ -2061,18 +2067,25 @@ fn row_ops(row: &[vt::Cell], cell: Size<Pixels>, cursor: Option<usize>, window: 
             .with_cell_positions(&positions, width);
         ops.push(RowOp::Text { x: start, line });
     }
-    row_decorations(row, &mut ops);
+    row_decorations(row, terminal_bg, &mut ops);
     ops
 }
 
-/// A cell's text color, dimmed when faint.
-fn cell_color(c: &vt::Cell) -> Hsla {
-    hsla(c.fg).opacity(if c.faint { 0.6 } else { 1.0 })
+const FAINT_ALPHA: f32 = 0.6;
+
+/// A cell's text color, dimmed when faint; on a painted background where it
+/// would be hard to read (a selection), a readable color instead (vt::legible).
+/// `terminal_bg`: the terminal's own background.
+fn cell_color(c: &vt::Cell, terminal_bg: Option<vt::Rgb>) -> Hsla {
+    match vt::legible(c, FAINT_ALPHA, terminal_bg) {
+        Some(fg) => hsla(fg),
+        None => hsla(c.fg).opacity(if c.faint { FAINT_ALPHA } else { 1.0 }),
+    }
 }
 
 /// A row's underlines and strikethroughs, from its cells alone, so sprites,
 /// icons and blanks get them too. Neighbours that look the same share one.
-fn row_decorations(row: &[vt::Cell], ops: &mut Vec<RowOp>) {
+fn row_decorations(row: &[vt::Cell], terminal_bg: Option<vt::Rgb>, ops: &mut Vec<RowOp>) {
     let mut x = 0;
     while x < row.len() {
         let c = &row[x];
@@ -2081,7 +2094,7 @@ fn row_decorations(row: &[vt::Cell], ops: &mut Vec<RowOp>) {
         if c.underline.is_none() && !c.strike {
             continue;
         }
-        let color = cell_color(c);
+        let color = cell_color(c, terminal_bg);
         let underline = c.underline.map(|s| (s, c.underline_color.map_or(color, |u| hsla(u).opacity(color.a))));
         let strike = c.strike.then_some(color);
         match ops.last_mut() {
@@ -2182,7 +2195,7 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
     for (y, row) in frame.rows.iter().enumerate() {
         let column = cursor.filter(|(_, cy)| *cy as usize == y).map(|(x, _)| x as usize);
         if frame.all || painted.get(y).is_none_or(|(r, _, c)| !Rc::ptr_eq(r, row) || *c != column) {
-            let ops = row_ops(row, cell, column, window);
+            let ops = row_ops_on(row, Some(frame.bg), cell, column, window);
             if y < painted.len() {
                 painted[y] = (row.clone(), ops, column);
             } else {

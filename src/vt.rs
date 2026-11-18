@@ -53,6 +53,41 @@ fn preserves_graphics_color(text: &str) -> bool {
             0x2500..=0x259f | 0xe0b0..=0xe0d7 | 0x1fb00..=0x1fbff | 0x1cc00..=0x1cebf))
 }
 
+/// How hard text must stand out from a background painted behind it: the
+/// terminal's selection, and backgrounds programs paint (an agent's own
+/// selection, a highlighted line).
+const SELECTED_CONTRAST: f32 = 4.5;
+const PAINTED_CONTRAST: f32 = 3.0;
+/// A painted background that keeps at least this share of the text's contrast
+/// on the terminal's own background is the program's design (dim text on a
+/// dark band), not a hiding place.
+const PAINTED_KEEPS: f32 = 0.75;
+
+/// The text color to draw instead when a cell's text would be hard to read on
+/// its painted background: a selection drawn in a color the text also uses
+/// (an agent's inline code under its own blue selection) would hide it.
+/// Measured as drawn: faint text is blended into the background by
+/// `faint_alpha`. `default_bg`: the terminal's own background, when known.
+/// Cells without a background of their own, and graphics, keep their colors.
+pub fn legible(c: &Cell, faint_alpha: f32, default_bg: Option<Rgb>) -> Option<Rgb> {
+    let bg = c.bg?;
+    if c.text.is_empty() || preserves_graphics_color(&c.text) {
+        return None;
+    }
+    let a = if c.faint { faint_alpha } else { 1.0 };
+    let seen_on = |b: Rgb| {
+        let mix = |f: u8, b: u8| (f as f32 * a + b as f32 * (1.0 - a)).round() as u8;
+        contrast(Rgb(mix(c.fg.0, b.0), mix(c.fg.1, b.1), mix(c.fg.2, b.2)), b)
+    };
+    let here = seen_on(bg);
+    let hidden = if c.selected {
+        here < SELECTED_CONTRAST
+    } else {
+        here < PAINTED_CONTRAST && default_bg.is_none_or(|d| here < seen_on(d) * PAINTED_KEEPS)
+    };
+    hidden.then(|| readable(c.fg, bg, f32::INFINITY))
+}
+
 /// `fg`, or near-white / near-black when it would vanish into `bg`.
 fn readable(fg: Rgb, bg: Rgb, minimum: f32) -> Rgb {
     if minimum <= 1.0 || contrast(fg, bg) >= minimum {
@@ -98,6 +133,8 @@ pub struct Cell {
     pub underline_color: Option<Rgb>,
     pub strike: bool,
     pub wide: bool,
+    /// Inside the terminal's own selection (its background is the selection color).
+    pub selected: bool,
 }
 
 /// How a cell is underlined (SGR 4, 4:1 to 4:5, 21).
@@ -1849,6 +1886,7 @@ impl Vt {
                 underline_color,
                 strike: style.strikethrough,
                 wide: wide == GHOSTTY_CELL_WIDE_WIDE,
+                selected,
             }
         }
     }
@@ -2242,6 +2280,51 @@ mod tests {
         vt.write(b"\x1b[?2048l");
         vt.resize(50, 7, 9, 18);
         assert!(vt.take_replies().is_empty());
+    }
+
+    #[test]
+    fn text_on_painted_backgrounds_stays_readable() {
+        let hex = |v: u32| Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+        let (default_bg, text, blue, dim, subtle) = (hex(0x1e1e2e), hex(0xcdd6f4), hex(0x89b4fa), hex(0x7f849c), hex(0x585b70));
+        let cell = |fg: Rgb, bg: Option<Rgb>| Cell { text: "a".into(), fg, bg, ..Default::default() };
+        let check = |c: &Cell| legible(c, 0.6, Some(default_bg));
+        let dark = Rgb(0x1b, 0x1b, 0x1e);
+        let light = Rgb(0xf2, 0xf2, 0xf4);
+        // An agent's own selection in ANSI blue: its text and its inline code (also blue).
+        assert_eq!(check(&cell(text, Some(blue))), Some(dark));
+        assert_eq!(check(&cell(blue, Some(blue))), Some(dark));
+        assert_eq!(check(&Cell { faint: true, ..cell(dim, Some(blue)) }), Some(dark));
+        // Not painted: dim stays dim.
+        assert_eq!(check(&cell(subtle, None)), None);
+        // A dark band the program drew behind dim text is its design.
+        assert_eq!(check(&cell(subtle, Some(hex(0x2a2b3d)))), None);
+        assert_eq!(check(&cell(dim, Some(hex(0x2a2b3d)))), None);
+        // The terminal's selection: readable text keeps its color, dim and faint text don't fade into it.
+        let sel = |fg: Rgb| Cell { selected: true, ..cell(fg, Some(hex(0x45475a))) };
+        assert_eq!(check(&sel(text)), None);
+        assert_eq!(check(&sel(hex(0xf9e2af))), None);
+        assert_eq!(check(&sel(dim)), Some(light));
+        assert_eq!(check(&sel(subtle)), Some(light));
+        assert_eq!(check(&Cell { faint: true, ..sel(text) }), Some(light));
+        // Graphics keep their colors (powerline arrows are drawn in the next segment's background).
+        assert_eq!(check(&Cell { text: "\u{e0b0}".into(), ..cell(blue, Some(blue)) }), None);
+        assert_eq!(check(&Cell { text: "\u{2588}".into(), ..cell(blue, Some(blue)) }), None);
+        // Blank cells draw no text.
+        assert_eq!(check(&Cell { text: String::new(), ..cell(blue, Some(blue)) }), None);
+        // Without the terminal's background, the plain threshold decides.
+        assert_eq!(legible(&cell(subtle, Some(hex(0x2a2b3d))), 0.6, None), Some(light));
+    }
+
+    #[test]
+    fn selected_cells_say_so() {
+        let mut vt = Vt::new(20, 2);
+        vt.write(b"hello world");
+        vt.select_all();
+        let frame = vt.frame();
+        assert!(frame.rows[0][0].selected);
+        vt.clear_selection();
+        let frame = vt.frame();
+        assert!(!frame.rows[0][0].selected);
     }
 
     #[test]
