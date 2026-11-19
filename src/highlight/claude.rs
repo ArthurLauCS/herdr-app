@@ -101,8 +101,14 @@ pub fn is_plain(cell: &Cell, theme_fg: Rgb) -> bool {
 /// (Nord's green, the least saturated, about 0.075).
 const REPLY_MAX_CHROMA: f32 = 0.07;
 
-/// OKLCH chroma of an sRGB color.
-fn chroma(c: Rgb) -> f32 {
+/// Error reds sit between these OKLCH hues, wrapping through 0: from pinkish (Catppuccin's #f38ba8,
+/// about 3) to orange-leaning (Gruvbox's #fb4934, about 30). Pinks fall below the start (Catppuccin's
+/// #f5c2e7, about 336), oranges past the end (Claude's #d77757, about 39).
+const RED_HUE_FROM: f32 = 345.0;
+const RED_HUE_TO: f32 = 35.0;
+
+/// OKLCH chroma and hue (degrees, 0 to 360) of an sRGB color.
+fn chroma_hue(c: Rgb) -> (f32, f32) {
     let lin = |v: u8| {
         let v = f32::from(v) / 255.0;
         if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
@@ -113,7 +119,7 @@ fn chroma(c: Rgb) -> f32 {
     let s = (0.088_302_5 * r + 0.281_718_8 * g + 0.629_978_7 * b).cbrt();
     let a = 1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s;
     let b = 0.025_904 * l + 0.782_771_8 * m - 0.808_675_8 * s;
-    a.hypot(b)
+    (a.hypot(b), b.atan2(a).to_degrees().rem_euclid(360.0))
 }
 
 pub fn bullet_of(cell: &Cell, theme_fg: Rgb) -> Bullet {
@@ -126,11 +132,12 @@ pub fn bullet_of(cell: &Cell, theme_fg: Rgb) -> Bullet {
     }
     match cell.src.fg {
         RawColor::Palette(i) => if matches!(i, 1 | 9) { Bullet::Failed } else { Bullet::Tool },
-        RawColor::Rgb(c) if chroma(c) < REPLY_MAX_CHROMA => Bullet::Reply,
-        // Truecolor themes: Claude Code's error red is rgb(255,107,128).
-        RawColor::Rgb(c) => {
-            if f32::from(c.0) > 1.5 * f32::from(c.1.max(c.2)) { Bullet::Failed } else { Bullet::Tool }
-        }
+        // Truecolor themes: Claude Code's error red is rgb(255,107,128); custom themes pick their own.
+        RawColor::Rgb(c) => match chroma_hue(c) {
+            (chroma, _) if chroma < REPLY_MAX_CHROMA => Bullet::Reply,
+            (_, hue) if !(RED_HUE_TO..RED_HUE_FROM).contains(&hue) => Bullet::Failed,
+            _ => Bullet::Tool,
+        },
         RawColor::Default => Bullet::Reply,
     }
 }

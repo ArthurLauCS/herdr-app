@@ -606,6 +606,15 @@ fn bullet_styles() {
     assert_eq!(b(&cell(RawColor::Rgb(hx("ebdbb2")), false)), Bullet::Reply, "gruvbox text");
     assert_eq!(b(&cell(RawColor::Rgb(hx("a6e3a1")), false)), Bullet::Tool, "catppuccin mocha green");
     assert_eq!(b(&cell(RawColor::Rgb(hx("a3be8c")), false)), Bullet::Tool, "nord green, the least saturated success color");
+    // Error reds run from pinkish (catppuccin, hue 3) to orange-leaning (gruvbox, hue 30).
+    assert_eq!(b(&cell(RawColor::Rgb(hx("f38ba8")), false)), Bullet::Failed, "catppuccin mocha red");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("eb6f92")), false)), Bullet::Failed, "rose pine love");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("bf616a")), false)), Bullet::Failed, "nord red");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("fb4934")), false)), Bullet::Failed, "gruvbox red");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("d20f39")), false)), Bullet::Failed, "catppuccin latte red");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("d77757")), false)), Bullet::Tool, "claude orange");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("fe8019")), false)), Bullet::Tool, "gruvbox orange");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("f5c2e7")), false)), Bullet::Tool, "catppuccin mocha pink");
 }
 
 #[test]
