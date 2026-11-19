@@ -599,6 +599,20 @@ fn bullet_styles() {
     assert_eq!(b(&cell(RawColor::Palette(9), false)), Bullet::Failed);
     assert_eq!(b(&cell(RawColor::Rgb(Rgb(255, 107, 128)), false)), Bullet::Failed);
     assert_eq!(b(&cell(RawColor::Rgb(Rgb(78, 186, 101)), false)), Bullet::Tool);
+    // Custom Claude themes tint the text color a reply's bullet is drawn in.
+    assert_eq!(b(&cell(RawColor::Rgb(hx("cdd6f4")), false)), Bullet::Reply, "catppuccin mocha text");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("4c4f69")), false)), Bullet::Reply, "catppuccin latte text");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("c0caf5")), false)), Bullet::Reply, "tokyo night text");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("ebdbb2")), false)), Bullet::Reply, "gruvbox text");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("a6e3a1")), false)), Bullet::Tool, "catppuccin mocha green");
+    assert_eq!(b(&cell(RawColor::Rgb(hx("a3be8c")), false)), Bullet::Tool, "nord green, the least saturated success color");
+}
+
+#[test]
+fn a_reply_bullet_in_a_tinted_text_color_marks_nothing() {
+    let tagged = |input: &str| marks(60, 2, blocks_only(ClaudeBlocks::Tags), input);
+    assert_eq!(tagged("\x1b[38;2;205;214;244m●\x1b[39m 风格审查已返回，等其余三个维度的结果到齐后一起核对。"), []);
+    assert_eq!(tagged("\x1b[38;2;205;214;244m●\x1b[39m 四个审查 agent 已在后台运行"), []);
 }
 
 #[test]

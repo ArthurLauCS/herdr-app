@@ -95,6 +95,27 @@ pub fn is_plain(cell: &Cell, theme_fg: Rgb) -> bool {
     is_neutral_fg(cell, theme_fg) && (!own_bg(cell) || echo_bg(cell))
 }
 
+/// A reply's bullet is drawn in Claude Code's text color, which custom themes tint (Catppuccin's
+/// #cdd6f4) so it is neither the terminal's foreground nor a gray. Text colors stay below this OKLCH
+/// chroma (up to about 0.06); the success, error and agent colors of tool bullets are above it
+/// (Nord's green, the least saturated, about 0.075).
+const REPLY_MAX_CHROMA: f32 = 0.07;
+
+/// OKLCH chroma of an sRGB color.
+fn chroma(c: Rgb) -> f32 {
+    let lin = |v: u8| {
+        let v = f32::from(v) / 255.0;
+        if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    let (r, g, b) = (lin(c.0), lin(c.1), lin(c.2));
+    let l = (0.412_221_5 * r + 0.536_332_5 * g + 0.051_446 * b).cbrt();
+    let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_397 * b).cbrt();
+    let s = (0.088_302_5 * r + 0.281_718_8 * g + 0.629_978_7 * b).cbrt();
+    let a = 1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s;
+    let b = 0.025_904 * l + 0.782_771_8 * m - 0.808_675_8 * s;
+    a.hypot(b)
+}
+
 pub fn bullet_of(cell: &Cell, theme_fg: Rgb) -> Bullet {
     // Claude Code dims the bullet of a running call and of collapsed summaries.
     if cell.faint {
@@ -105,6 +126,7 @@ pub fn bullet_of(cell: &Cell, theme_fg: Rgb) -> Bullet {
     }
     match cell.src.fg {
         RawColor::Palette(i) => if matches!(i, 1 | 9) { Bullet::Failed } else { Bullet::Tool },
+        RawColor::Rgb(c) if chroma(c) < REPLY_MAX_CHROMA => Bullet::Reply,
         // Truecolor themes: Claude Code's error red is rgb(255,107,128).
         RawColor::Rgb(c) => {
             if f32::from(c.0) > 1.5 * f32::from(c.1.max(c.2)) { Bullet::Failed } else { Bullet::Tool }
