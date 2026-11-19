@@ -370,6 +370,7 @@ pub struct Person {
     /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
     pub zoom: f32,
     pub sounds: Sounds,
+    pub notifications: Notifications,
     /// The herdr-core to use, when it isn't where Herdr looks (core_bin.rs).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub core: Option<String>,
@@ -476,6 +477,7 @@ impl Default for Person {
         Person {
             zoom: 1.0,
             sounds: Sounds::default(),
+            notifications: Notifications::default(),
             core: None,
             font: None,
             font_size: None,
@@ -545,6 +547,7 @@ pub struct Settings {
     pub terminal_bold_bright: bool,
     pub option_as_alt: OptionAsAlt,
     pub sounds: Sounds,
+    pub notifications: Notifications,
 }
 
 /// Attention sounds: when an agent needs you, and when one finished while you
@@ -563,6 +566,22 @@ pub struct Sounds {
 impl Default for Sounds {
     fn default() -> Self {
         Sounds { enabled: true, done: None, blocked: None }
+    }
+}
+
+/// What else happens on those alerts while Herdr isn't the active window
+/// (attention.rs; Windows for now): `taskbar` flashes its button, `system`
+/// shows a system notification that goes to the agent when clicked.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Notifications {
+    pub system: bool,
+    pub taskbar: bool,
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Notifications { system: true, taskbar: true }
     }
 }
 
@@ -595,6 +614,7 @@ impl Default for Settings {
             terminal_bold_bright: true,
             option_as_alt: OptionAsAlt::Auto,
             sounds: Sounds::default(),
+            notifications: Notifications::default(),
         }
     }
 }
@@ -635,6 +655,7 @@ impl Settings {
             terminal_padding: look.terminal_padding.unwrap_or(d.terminal_padding),
             terminal_opacity: look.terminal_opacity.unwrap_or(1.0).clamp(0.0, 1.0),
             sounds: person.sounds.clone(),
+            notifications: person.notifications.clone(),
             clipboard_write: person.clipboard_write,
             copy_on_select: person.copy_on_select,
             minimum_contrast: person.minimum_contrast,

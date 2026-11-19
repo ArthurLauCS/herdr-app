@@ -736,6 +736,12 @@ What's about the user, never a look:
   goes there when clicked. `done` / `blocked` replace the bundled MP3s
   (path absolute or relative to `~/.config/herdr-app`). Changes apply live,
   including the Play buttons in Settings > Alerts.
+- `notifications`: `{ "system": true, "taskbar": true }`. On those same
+  alerts while Herdr isn't the active window (Windows for now): `taskbar`
+  flashes its taskbar button until the window comes forward, `system` shows a
+  system notification (name and place; click it to go to that agent). A newer
+  alert replaces the same terminal's older notification; coming back to the
+  window clears them. Changes apply live.
 - `core`: the herdr-core binary to use, when it isn't where Herdr looks
   (PATH, the login shell's PATH, `~/.local/bin`, Homebrew, mise, Nix,
   cargo). Read at start.
