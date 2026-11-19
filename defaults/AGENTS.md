@@ -815,6 +815,38 @@ What's about the user, never a look:
   background; this is a threshold, not a guaranteed resulting ratio.
   Box/block, Powerline and sprite glyph colors are never adjusted.
   Changes apply immediately, including text already on screen.
+- `terminal_highlights`: recolors plain terminal text as it is drawn (what
+  programs wrote is untouched, copying gives the original text). On by
+  default. `{"enabled": true, "presets": {}, "rules": [], "claude_blocks": "tags"}`:
+  - `enabled`: `false` turns all of it off.
+  - `presets`: id to on/off, any not named are on. Ids, in priority order:
+    `errors` (red: error, failed, fatal, panic, denied, ✗; not after "0 "
+    or "no "), `warnings` (yellow), `success` (green: passed, succeeded,
+    ✓), `paths` (cyan: URLs, file paths, `file.ext:line`), `references`
+    (magenta: `#123`, commit hashes), `lists` (blue: list markers at the
+    start of a line), `metrics` (subtle yellow: numbers, durations, sizes,
+    percentages). Example: `{"metrics": false}`.
+  - `rules`: your own, tried before the presets:
+    `{"id": "todo", "pattern": "TODO|FIXME", "hue": "magenta", "case_sensitive": false, "subtle": false, "enabled": true}`.
+    `pattern` is a regex (fancy-regex syntax, so lookaround works) matched
+    against a whole line, wrapped rows joined; `hue` is `red`, `yellow`,
+    `green`, `cyan`, `blue` or `magenta`, drawn in the theme's bright
+    ANSI colors on a dark theme and the normal ones on a light one;
+    `subtle` blends the hue half-way into the text color and skips dim
+    text. A pattern that doesn't compile is skipped and reported.
+  - Only plain text is recolored: not text the program colored itself,
+    inverse or on a background color it painted. One rule colors a cell.
+  - `claude_blocks`: how Claude Code's transcript is marked: `"tags"`
+    (default) tints each tool call's name by kind (read cyan, edit yellow,
+    shell magenta, agent or plugin blue, web green, failed red) and
+    colors the `⎿` of its output; `"rows"` tints the whole call and
+    output rows instead; `"off"`. Both also give the prompt echo and
+    inline code a soft background, color quote bars and tint diff lines.
+  Changes apply immediately, including text already on screen.
+- `terminal_bold_bright`: bold text in ANSI colors 0-7 draws in the bright
+  colors 8-15 (default `true`); `false` keeps bold text in its own color.
+  Default-colored and true-color text is never changed.
+  Changes apply immediately.
 - `clipboard_write`: `false` blocks terminal programs from writing the local
   clipboard (default `true`, including remote terminals attached in this window).
   OSC 52 accepts base64 UTF-8 text up to 1 MiB: `c` writes the system clipboard,

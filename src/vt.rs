@@ -53,6 +53,62 @@ fn preserves_graphics_color(text: &str) -> bool {
             0x2500..=0x259f | 0xe0b0..=0xe0d7 | 0x1fb00..=0x1fbff | 0x1cc00..=0x1cebf))
 }
 
+/// How hard text must stand out from a background painted behind it: the
+/// terminal's selection, and backgrounds programs paint (an agent's own
+/// selection, a highlighted line).
+const SELECTED_CONTRAST: f32 = 4.5;
+const PAINTED_CONTRAST: f32 = 3.0;
+/// A painted background that keeps at least this share of the text's contrast
+/// on the terminal's own background is the program's design (dim text on a
+/// dark band), not a hiding place.
+const PAINTED_KEEPS: f32 = 0.75;
+
+/// The text color to draw instead when a cell's text would be hard to read on
+/// its painted background: a selection drawn in a color the text also uses
+/// (an agent's inline code under its own blue selection) would hide it.
+/// Measured as drawn: faint text is blended into the background by
+/// `faint_alpha`. `default_bg`: the terminal's own background, when known.
+/// Cells without a background of their own, and graphics, keep their colors.
+pub fn legible(c: &Cell, faint_alpha: f32, default_bg: Option<Rgb>) -> Option<Rgb> {
+    let bg = c.bg?;
+    if c.text.is_empty() || preserves_graphics_color(&c.text) {
+        return None;
+    }
+    let a = if c.faint { faint_alpha } else { 1.0 };
+    let seen_on = |b: Rgb| {
+        let mix = |f: u8, b: u8| (f as f32 * a + b as f32 * (1.0 - a)).round() as u8;
+        contrast(Rgb(mix(c.fg.0, b.0), mix(c.fg.1, b.1), mix(c.fg.2, b.2)), b)
+    };
+    let here = seen_on(bg);
+    let hidden = if c.selected {
+        here < SELECTED_CONTRAST
+    } else {
+        here < PAINTED_CONTRAST && default_bg.is_none_or(|d| here < seen_on(d) * PAINTED_KEEPS)
+    };
+    hidden.then(|| lift(c.fg, bg, SELECTED_CONTRAST))
+}
+
+/// `fg` moved toward near-white or near-black, whichever `bg` sets off better, just far enough
+/// to reach `target` contrast on it: red text stays reddish under a selection.
+fn lift(fg: Rgb, bg: Rgb, target: f32) -> Rgb {
+    let (light, dark) = (Rgb(0xf2, 0xf2, 0xf4), Rgb(0x1b, 0x1b, 0x1e));
+    let end = if contrast(light, bg) >= contrast(dark, bg) { light } else { dark };
+    let toward = |t: f32| {
+        let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+        Rgb(m(fg.0, end.0), m(fg.1, end.1), m(fg.2, end.2))
+    };
+    if contrast(end, bg) <= target {
+        return end;
+    }
+    // Contrast first falls (where fg crosses bg's lightness) then rises: the first t that reaches the target.
+    let (mut lo, mut hi) = (0.0_f32, 1.0_f32);
+    for _ in 0..12 {
+        let mid = (lo + hi) / 2.0;
+        if contrast(toward(mid), bg) >= target { hi = mid } else { lo = mid }
+    }
+    toward(hi)
+}
+
 /// `fg`, or near-white / near-black when it would vanish into `bg`.
 fn readable(fg: Rgb, bg: Rgb, minimum: f32) -> Rgb {
     if minimum <= 1.0 || contrast(fg, bg) >= minimum {
@@ -98,6 +154,27 @@ pub struct Cell {
     pub underline_color: Option<Rgb>,
     pub strike: bool,
     pub wide: bool,
+    /// What the program asked for, before the theme, inverse and selection
+    /// turned it into `fg` and `bg`: what the highlighter classifies by.
+    pub src: Src,
+    /// Inside the terminal's own selection (its background is the selection color).
+    pub selected: bool,
+}
+
+/// A color as the program set it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RawColor {
+    #[default]
+    Default,
+    Palette(u8),
+    Rgb(Rgb),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Src {
+    pub fg: RawColor,
+    pub bg: RawColor,
+    pub inverse: bool,
 }
 
 /// How a cell is underlined (SGR 4, 4:1 to 4:5, 21).
@@ -268,6 +345,37 @@ fn kitty_virtual_cell(x: u16, y: u16, grid_ref: &GhosttyGridRef) -> Option<Kitty
         row: graphemes.get(1).and_then(|c| kitty_placeholder_diacritic_index(*c)),
         col: graphemes.get(2).and_then(|c| kitty_placeholder_diacritic_index(*c)),
     })
+}
+
+fn raw_color(color: GhosttyStyleColor) -> RawColor {
+    unsafe {
+        match color.tag {
+            GHOSTTY_STYLE_COLOR_PALETTE => RawColor::Palette(color.value.palette),
+            GHOSTTY_STYLE_COLOR_RGB => RawColor::Rgb(Rgb::from(color.value.rgb)),
+            _ => RawColor::Default,
+        }
+    }
+}
+
+/// The background a cell was given: by its style, or by an erase that left the color in the cell itself.
+unsafe fn bg_src(raw: GhosttyCell, style: &GhosttyStyle) -> RawColor {
+    unsafe {
+        let mut tag: GhosttyCellContentTag = 0;
+        ghostty_cell_get(raw, GHOSTTY_CELL_DATA_CONTENT_TAG, &mut tag as *mut _ as *mut c_void);
+        match tag {
+            GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE => {
+                let mut i: GhosttyColorPaletteIndex = 0;
+                ghostty_cell_get(raw, GHOSTTY_CELL_DATA_COLOR_PALETTE, &mut i as *mut _ as *mut c_void);
+                RawColor::Palette(i)
+            }
+            GHOSTTY_CELL_CONTENT_BG_COLOR_RGB => {
+                let mut c = GhosttyColorRgb::default();
+                ghostty_cell_get(raw, GHOSTTY_CELL_DATA_COLOR_RGB, &mut c as *mut _ as *mut c_void);
+                RawColor::Rgb(Rgb::from(c))
+            }
+            _ => raw_color(style.bg_color),
+        }
+    }
 }
 
 fn kitty_placeholder_color_to_id(color: GhosttyStyleColor) -> u32 {
@@ -530,6 +638,12 @@ pub struct Vt {
     seen: HashMap<[u64; 2], (Rc<Vec<Cell>>, Option<(u16, u16)>)>,
     /// The width and colors they were read with: a change reads every row.
     seen_with: (u16, u64),
+    /// Bold text in ANSI colors 0-7 draws bright (settings.json `terminal_bold_bright`).
+    bold_bright: bool,
+    /// The settings the highlighter was last matched to.
+    hl_seen: Option<Rc<crate::settings::Settings>>,
+    hl_config: Option<crate::highlight::TerminalHighlights>,
+    hl: Option<crate::highlight::Highlighter>,
     placements_cache: RefCell<Option<Vec<Placement>>>,
     /// Whether the program wants win32 key events (Ghostty doesn't track it).
     pub win32: crate::win32_keys::Win32Input,
@@ -769,6 +883,10 @@ impl Vt {
                 drawn: Default::default(),
                 seen: HashMap::new(),
                 seen_with: (0, 0),
+                bold_bright: true,
+                hl_seen: None,
+                hl_config: None,
+                hl: None,
                 placements_cache: RefCell::new(None),
                 win32: Default::default(),
             };
@@ -784,6 +902,9 @@ impl Vt {
             self.apply_theme();
             // Rows carry the theme's own colors too (the selection's).
             self.seen.clear();
+            // The highlight hues come from the theme.
+            self.hl_config = None;
+            self.hl_seen = None;
         }
     }
 
@@ -1289,6 +1410,112 @@ impl Vt {
         }.or_else(|| self.link_in(&text, &spots, top, at, &mut find, LinkScan::Unresolved))
     }
 
+    /// Follows settings.json: highlighting and bold-in-bright colors.
+    fn sync_highlights(&mut self) {
+        let settings = crate::settings::get();
+        if self.hl_seen.as_ref().is_some_and(|s| Rc::ptr_eq(s, &settings)) {
+            return;
+        }
+        self.hl_seen = Some(settings.clone());
+        if self.bold_bright != settings.terminal_bold_bright {
+            self.bold_bright = settings.terminal_bold_bright;
+            self.seen.clear();
+        }
+        if self.hl_config.as_ref() != Some(&settings.terminal_highlights) {
+            self.hl_config = Some(settings.terminal_highlights.clone());
+            self.hl = crate::highlight::Highlighter::new(&settings.terminal_highlights, &self.theme);
+        }
+    }
+
+    /// Screen row of the viewport's first row.
+    fn viewport_top(&self) -> Option<u32> {
+        unsafe {
+            let r = self.grid_ref(GHOSTTY_POINT_TAG_VIEWPORT, 0, 0)?;
+            let mut p = GhosttyPointCoordinate::default();
+            (ghostty_terminal_point_from_grid_ref(self.term, &r, GHOSTTY_POINT_TAG_SCREEN, &mut p) == GHOSTTY_SUCCESS).then_some(p.y)
+        }
+    }
+
+    /// The text of the first cell of screen row `y`.
+    fn first_text(&self, y: u32) -> Option<String> {
+        let r = self.grid_ref(GHOSTTY_POINT_TAG_SCREEN, 0, y)?;
+        let mut cps = [0u32; 16];
+        let mut len = 0usize;
+        unsafe { ghostty_grid_ref_graphemes(&r, cps.as_mut_ptr(), cps.len(), &mut len) };
+        Some(cps[..len.min(cps.len())].iter().filter_map(|c| char::from_u32(*c)).collect())
+    }
+
+    /// Screen row `y`'s first `max` cells, with what the highlighter classifies by.
+    fn above_row(&self, y: u32, max: u16, full: bool) -> Option<crate::highlight::Above> {
+        let mut r = self.grid_ref(GHOSTTY_POINT_TAG_SCREEN, 0, y)?;
+        let mut cells = Vec::with_capacity(max.min(self.cols) as usize);
+        for x in 0..self.cols.min(max) {
+            r.x = x;
+            unsafe {
+                let mut raw: GhosttyCell = Default::default();
+                ghostty_grid_ref_cell(&r, &mut raw);
+                let mut wide: GhosttyCellWide = GHOSTTY_CELL_WIDE_NARROW;
+                ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &mut wide as *mut _ as *mut c_void);
+                let mut style = GhosttyStyle { size: std::mem::size_of::<GhosttyStyle>(), ..Default::default() };
+                ghostty_grid_ref_style(&r, &mut style);
+                let mut text = String::new();
+                if wide != GHOSTTY_CELL_WIDE_SPACER_TAIL && wide != GHOSTTY_CELL_WIDE_SPACER_HEAD && !style.invisible {
+                    let mut cps = [0u32; 16];
+                    let mut len = 0usize;
+                    ghostty_grid_ref_graphemes(&r, cps.as_mut_ptr(), cps.len(), &mut len);
+                    text.extend(cps[..len.min(cps.len())].iter().filter_map(|c| char::from_u32(*c)));
+                }
+                cells.push(Cell {
+                    text,
+                    bold: style.bold,
+                    faint: style.faint,
+                    wide: wide == GHOSTTY_CELL_WIDE_WIDE,
+                    src: Src { fg: raw_color(style.fg_color), bg: bg_src(raw, &style), inverse: style.inverse },
+                    ..Default::default()
+                });
+            }
+        }
+        Some(crate::highlight::Above { cells, wrapped: y > 0 && self.wraps(y - 1), full })
+    }
+
+    /// The rows above the viewport that what is drawn depends on: the head of a logical line that
+    /// starts above it, and the Claude Code block its first rows belong to (a tool call's output
+    /// can start screens up).
+    fn above_rows(&self, blocks: bool) -> Vec<crate::highlight::Above> {
+        // A held frame is older than the terminal: its rows no longer sit where the terminal says.
+        if self.shared.held_since.is_some() {
+            return Vec::new();
+        }
+        // A tool's output can start above the viewport; look this far up for its call line.
+        const MAX_BLOCK_LOOKBACK: u32 = 300;
+        // Past a name and its call, a row is only told apart by what its first cells hold.
+        const BLOCK_COLUMNS: u16 = 44;
+        const MAX_WRAPPED_ROWS: u32 = 8;
+        let Some(top) = self.viewport_top().filter(|t| *t > 0) else { return Vec::new() };
+        let mut head = top;
+        while top - head < MAX_WRAPPED_ROWS && head > 0 && self.wraps(head - 1) {
+            head -= 1;
+        }
+        let mut start = head;
+        if blocks {
+            // The bullet line of the block that reaches `head`; replies span blank lines, any other
+            // unindented line ends a block.
+            for y in (head.saturating_sub(MAX_BLOCK_LOOKBACK)..head).rev() {
+                let Some(first) = self.first_text(y) else { break };
+                if first.starts_with('\u{25cf}') {
+                    start = y;
+                    break;
+                }
+                if !(first.is_empty() || first.starts_with(' ') || y > 0 && self.wraps(y - 1)) {
+                    break;
+                }
+            }
+        }
+        let mut rows: Vec<_> = (start..head).filter_map(|y| self.above_row(y, BLOCK_COLUMNS, false)).collect();
+        rows.extend((head..top).filter_map(|y| self.above_row(y, self.cols, true)));
+        rows
+    }
+
     /// Whether the terminal wrapped screen row `y` onto the next.
     fn wraps(&self, y: u32) -> bool {
         unsafe {
@@ -1693,6 +1920,7 @@ impl Vt {
                 ghostty_terminal_set(self.term, GHOSTTY_TERMINAL_OPT_MODE, &cfg as *const _ as *const c_void);
                 self.shared.held_since = None;
             }
+            self.sync_highlights();
             let state = self.shared.state;
             if self.shared.held_since.is_none() {
                 ghostty_render_state_update(state, self.term);
@@ -1712,6 +1940,8 @@ impl Vt {
             let all = dirty == GHOSTTY_RENDER_STATE_DIRTY_FULL || with != self.seen_with;
             let mut seen = HashMap::with_capacity(self.rows as usize);
             let mut rows = Vec::with_capacity(self.rows as usize);
+            let mut wraps: Vec<bool> = Vec::new();
+            let mut hl = self.hl.take();
             ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &mut self.rows_it as *mut _ as *mut c_void);
             while ghostty_render_state_row_iterator_next(self.rows_it) {
                 let mut sel = GhosttyRenderStateRowSelection { size: std::mem::size_of::<GhosttyRenderStateRowSelection>(), ..Default::default() };
@@ -1742,9 +1972,21 @@ impl Vt {
                 if known {
                     seen.insert(id.bits, (row.clone(), selection));
                 }
+                if hl.is_some() {
+                    let mut raw: GhosttyRow = Default::default();
+                    let mut continued = false;
+                    ghostty_render_state_row_get(self.rows_it, GHOSTTY_RENDER_STATE_ROW_DATA_RAW, &mut raw as *mut _ as *mut c_void);
+                    ghostty_row_get(raw, GHOSTTY_ROW_DATA_WRAP_CONTINUATION, &mut continued as *mut _ as *mut c_void);
+                    wraps.push(continued);
+                }
                 rows.push(row);
             }
             (self.seen, self.seen_with) = (seen, with);
+            if let Some(h) = hl.as_mut() {
+                let above = self.above_rows(h.wants_blocks());
+                rows = h.decorate(&above, &rows, &wraps);
+            }
+            self.hl = hl;
 
             let mut cur = GhosttyRenderStateCursor { size: std::mem::size_of::<GhosttyRenderStateCursor>(), ..Default::default() };
             ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_CURSOR, &mut cur as *mut _ as *mut c_void);
@@ -1792,6 +2034,11 @@ impl Vt {
                 .then(|| Rgb::from(bg));
 
             let (mut fg, mut bg) = (fg, bg);
+            let src = Src { fg: raw_color(style.fg_color), bg: bg_src(raw, &style), inverse: style.inverse };
+            // Bold text in ANSI colors 0-7 draws with the bright 8-15.
+            if self.bold_bright && style.bold && let RawColor::Palette(i @ 0..=7) = src.fg {
+                fg = Rgb::from(palette[usize::from(i) + 8]);
+            }
             if style.inverse {
                 let new_fg = bg.unwrap_or(self.theme.bg);
                 bg = Some(fg);
@@ -1849,6 +2096,8 @@ impl Vt {
                 underline_color,
                 strike: style.strikethrough,
                 wide: wide == GHOSTTY_CELL_WIDE_WIDE,
+                src,
+                selected,
             }
         }
     }
@@ -2203,7 +2452,8 @@ mod tests {
         let first: String = f.rows[0].iter().map(|c| c.text.as_str()).collect();
         assert!(first.starts_with("hi red"), "{first:?}");
         assert!(f.rows[0][3].bold);
-        assert_eq!(f.rows[0][3].fg, theme().palette16[1]);
+        // Bold text in ANSI colors 0-7 draws bright by default.
+        assert_eq!(f.rows[0][3].fg, theme().palette16[9]);
         assert!(f.rows[1][0].wide);
         assert_eq!(f.rows[1][0].text, "中");
         assert_eq!(f.rows[1][1].text, "");
@@ -2242,6 +2492,63 @@ mod tests {
         vt.write(b"\x1b[?2048l");
         vt.resize(50, 7, 9, 18);
         assert!(vt.take_replies().is_empty());
+    }
+
+    #[test]
+    fn text_on_painted_backgrounds_stays_readable() {
+        let hex = |v: u32| Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+        let (default_bg, text, blue, dim, subtle) = (hex(0x1e1e2e), hex(0xcdd6f4), hex(0x89b4fa), hex(0x7f849c), hex(0x585b70));
+        let cell = |fg: Rgb, bg: Option<Rgb>| Cell { text: "a".into(), fg, bg, ..Default::default() };
+        let check = |c: &Cell| legible(c, 0.6, Some(default_bg));
+        let sum = |c: Rgb| u32::from(c.0) + u32::from(c.1) + u32::from(c.2);
+        // Redrawn to be read on its background, darker or lighter than it.
+        let redrawn = |c: &Cell, darker: bool| {
+            let (fg, bg) = (check(c).expect("redrawn"), c.bg.unwrap());
+            assert!(contrast(fg, bg) >= SELECTED_CONTRAST, "{fg:?} on {bg:?}");
+            assert_eq!(sum(fg) < sum(bg), darker, "{fg:?} on {bg:?}");
+            fg
+        };
+        // An agent's own selection in ANSI blue: its text and its inline code (also blue).
+        redrawn(&cell(text, Some(blue)), true);
+        redrawn(&cell(blue, Some(blue)), true);
+        redrawn(&Cell { faint: true, ..cell(dim, Some(blue)) }, true);
+        // Not painted: dim stays dim.
+        assert_eq!(check(&cell(subtle, None)), None);
+        // A dark band the program drew behind dim text is its design.
+        assert_eq!(check(&cell(subtle, Some(hex(0x2a2b3d)))), None);
+        assert_eq!(check(&cell(dim, Some(hex(0x2a2b3d)))), None);
+        // The terminal's selection: readable text keeps its color, dim and faint text don't fade into it.
+        let sel = |fg: Rgb| Cell { selected: true, ..cell(fg, Some(hex(0x45475a))) };
+        assert_eq!(check(&sel(text)), None);
+        assert_eq!(check(&sel(hex(0xf9e2af))), None);
+        redrawn(&sel(dim), false);
+        redrawn(&sel(subtle), false);
+        redrawn(&Cell { faint: true, ..sel(text) }, false);
+        // Colored text keeps its hue: red stays reddish, only lighter.
+        let red = redrawn(&sel(hex(0xf38ba8)), false);
+        assert!(red.0 > red.2 && red.0 > red.1, "{red:?}");
+        assert_ne!(red, Rgb(0xf2, 0xf2, 0xf4));
+        // Graphics keep their colors (powerline arrows are drawn in the next segment's background).
+        assert_eq!(check(&Cell { text: "\u{e0b0}".into(), ..cell(blue, Some(blue)) }), None);
+        assert_eq!(check(&Cell { text: "\u{2588}".into(), ..cell(blue, Some(blue)) }), None);
+        // Blank cells draw no text.
+        assert_eq!(check(&Cell { text: String::new(), ..cell(blue, Some(blue)) }), None);
+        // Without the terminal's background, the plain threshold decides.
+        let band = hex(0x2a2b3d);
+        let fg = legible(&cell(subtle, Some(band)), 0.6, None).expect("redrawn");
+        assert!(contrast(fg, band) >= SELECTED_CONTRAST && sum(fg) > sum(band));
+    }
+
+    #[test]
+    fn selected_cells_say_so() {
+        let mut vt = Vt::new(20, 2);
+        vt.write(b"hello world");
+        vt.select_all();
+        let frame = vt.frame();
+        assert!(frame.rows[0][0].selected);
+        vt.clear_selection();
+        let frame = vt.frame();
+        assert!(!frame.rows[0][0].selected);
     }
 
     #[test]

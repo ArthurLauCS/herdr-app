@@ -406,6 +406,12 @@ pub struct Person {
     pub pane_scrollbars: bool,
     /// Minimum terminal text contrast ratio; 1 leaves program colors unchanged.
     pub minimum_contrast: f32,
+    /// Recolored terminal text: errors, paths, numbers, Claude Code tool calls.
+    #[serde(skip_serializing_if = "is_default_highlights")]
+    pub terminal_highlights: crate::highlight::TerminalHighlights,
+    /// Bold text in ANSI colors 0-7 draws in the bright 8-15.
+    #[serde(skip_serializing_if = "is_true")]
+    pub terminal_bold_bright: bool,
     /// macOS Option sends Alt shortcuts, or follows the keyboard layout.
     #[serde(skip_serializing_if = "OptionAsAlt::is_auto")]
     pub option_as_alt: OptionAsAlt,
@@ -454,6 +460,10 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+fn is_default_highlights(h: &crate::highlight::TerminalHighlights) -> bool {
+    *h == crate::highlight::TerminalHighlights::default()
+}
+
 impl Default for Person {
     fn default() -> Self {
         Person {
@@ -473,6 +483,8 @@ impl Default for Person {
             copy_on_select: true,
             pane_scrollbars: true,
             minimum_contrast: 1.0,
+            terminal_highlights: Default::default(),
+            terminal_bold_bright: true,
             option_as_alt: OptionAsAlt::Auto,
             appearance: Appearance::System,
             theme: None,
@@ -519,6 +531,8 @@ pub struct Settings {
     pub clipboard_write: bool,
     pub copy_on_select: bool,
     pub minimum_contrast: f32,
+    pub terminal_highlights: crate::highlight::TerminalHighlights,
+    pub terminal_bold_bright: bool,
     pub option_as_alt: OptionAsAlt,
     pub sounds: Sounds,
 }
@@ -566,6 +580,8 @@ impl Default for Settings {
             clipboard_write: true,
             copy_on_select: true,
             minimum_contrast: 1.0,
+            terminal_highlights: Default::default(),
+            terminal_bold_bright: true,
             option_as_alt: OptionAsAlt::Auto,
             sounds: Sounds::default(),
         }
@@ -610,6 +626,8 @@ impl Settings {
             clipboard_write: person.clipboard_write,
             copy_on_select: person.copy_on_select,
             minimum_contrast: person.minimum_contrast,
+            terminal_highlights: person.terminal_highlights.clone(),
+            terminal_bold_bright: person.terminal_bold_bright,
             option_as_alt: person.option_as_alt,
         }
     }
@@ -658,6 +676,7 @@ impl Settings {
         if !(1.0..=21.0).contains(&self.minimum_contrast) {
             out.push(format!("minimum_contrast {} is outside 1..21", self.minimum_contrast));
         }
+        out.extend(self.terminal_highlights.problems());
         if !(100..=900).contains(&self.font_weight) {
             out.push(format!("font_weight {} is outside 100..900", self.font_weight));
         }
@@ -1080,7 +1099,7 @@ mod tests {
     /// settings.json key.
     #[test]
     fn the_guide_explains_every_setting() {
-        let all = Person { core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), font_weight: Some(400), ui_font: Some(String::new()), telemetry: false, clipboard_write: false, copy_on_select: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
+        let all = Person { core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), font_weight: Some(400), ui_font: Some(String::new()), telemetry: false, clipboard_write: false, copy_on_select: false, terminal_bold_bright: false, terminal_highlights: crate::highlight::TerminalHighlights { enabled: false, ..Default::default() }, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
         let keys: Vec<String> = serde_json::to_value(&all).unwrap().as_object().unwrap().keys().cloned().collect();
         let guide = include_str!("../defaults/AGENTS.md");
         let section = guide.split("## The person").nth(1).and_then(|s| s.split("\n## ").next()).unwrap_or_default();
