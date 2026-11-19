@@ -28,6 +28,7 @@ const values = {
   View: class {}, div: element, svg: (path: string) => { icons.push(path); return element(); }, v_flex: element, h_flex: element, Input: { new: element }, theme: () => ({}), keys: () => [], win: () => ({ platform }),
   commands: () => [{ name: "app.theme", args: [{ name: "name", required: true }], about: "Use a theme." }], layouts: () => ["main", "win98"], shared: () => "main",
   themes: () => shipped.map(([name, light]) => ({ name, light })), settings: () => ({ dark }),
+  tr: (s: string, v?: Record<string, string>) => s.replace(/\{(\w+)\}/g, (m, k) => (v && k in v ? v[k] : m)),
 };
 const Palette = new Function(...Object.keys(values), source.replace(/^import .*;\n/gm, "").replace("export default class Palette", "return class Palette"))(...Object.values(values));
 function find(root: Element, id: string): Element | undefined {

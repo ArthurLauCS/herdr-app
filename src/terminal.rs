@@ -4,6 +4,7 @@
 mod drag_paths;
 
 use crate::hc::{Core, Stream};
+use crate::i18n::{tr, tr_fmt};
 use crate::vt::{self, CursorShape, Rgb, Select, Vt};
 use ghostty_sys::*;
 use gpui::prelude::FluentBuilder as _;
@@ -169,7 +170,7 @@ pub struct TerminalView {
     pub right_click_to_program: bool,
     /// Files on their way to this terminal's machine for over a second: what
     /// the pane says meanwhile, by send.
-    sending: Vec<(u64, &'static str)>,
+    sending: Vec<(u64, String)>,
     grid: Rc<RefCell<Grid>>,
     focus: FocusHandle,
     was_focused: bool,
@@ -735,9 +736,9 @@ impl TerminalView {
         static SENDS: AtomicU64 = AtomicU64::new(0);
         let send = SENDS.fetch_add(1, Ordering::Relaxed);
         let label = match (copies, paths.len()) {
-            (true, _) => "Sending image…",
-            (false, 1) => "Sending file…",
-            _ => "Sending files…",
+            (true, _) => tr("Sending image…"),
+            (false, 1) => tr("Sending file…"),
+            _ => tr("Sending files…"),
         };
         let done = Rc::new(Cell::new(false));
         let shown = done.clone();
@@ -911,7 +912,7 @@ impl TerminalView {
         let input = if let Some(input) = self.search_input.clone() {
             input
         } else {
-            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in terminal"));
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Find in terminal")));
             cx.subscribe(&input, |this, input, event: &InputEvent, cx| match event {
                 InputEvent::Change => {
                     this.search_query = input.read(cx).value().to_string();
@@ -1443,11 +1444,11 @@ fn put_answer(stdout: &[u8], stderr: &[u8]) -> Result<String, String> {
 fn refusal_notice(refused: &[(String, String)]) -> Option<(String, String)> {
     match refused {
         [] => None,
-        [(name, why)] => Some((format!("Couldn't send {name}"), why.clone())),
+        [(name, why)] => Some((tr_fmt("Couldn't send {name}", &[("name", name)]), why.clone())),
         many => {
             let mut why: Vec<&str> = many.iter().map(|(_, w)| w.as_str()).collect();
             why.dedup();
-            Some((format!("Couldn't send {} files", many.len()), why.join("; ")))
+            Some((tr_fmt("Couldn't send {count} files", &[("count", &many.len().to_string())]), why.join("; ")))
         }
     }
 }
@@ -2493,19 +2494,19 @@ impl Render for TerminalView {
         let grid_paint = self.grid.clone();
         let selection_view = cx.entity().downgrade();
         let (input_focus, input_view) = (self.focus.clone(), cx.entity());
-        let ended = self.ended.clone().or_else(|| self.lost.then(|| "reconnecting to core…".to_owned()));
+        let ended = self.ended.clone().or_else(|| self.lost.then(|| tr("reconnecting to core…")));
         let search_input = self.search_open.then(|| self.search_input.clone()).flatten();
         let search_progress = self.grid.borrow().vt.search_progress();
         let search_label = if self.search_query.is_empty() {
             String::new()
         } else if !search_progress.complete {
-            if search_progress.total == 0 { "Searching…".to_owned() } else { format!("{}+", search_progress.total) }
+            if search_progress.total == 0 { tr("Searching…") } else { format!("{}+", search_progress.total) }
         } else if search_progress.total == 0 {
-            "No matches".to_owned()
+            tr("No matches")
         } else if let Some(selected) = search_progress.selected {
             format!("{} / {}", selected + 1, search_progress.total)
         } else {
-            format!("{} matches", search_progress.total)
+            tr_fmt("{count} matches", &[("count", &search_progress.total.to_string())])
         };
         let address = self.address.clone();
 
@@ -2803,7 +2804,7 @@ impl Render for TerminalView {
                         .bg(crate::settings::color("raised"))
                         .text_color(hsla(vt::theme().fg))
                         .text_xs()
-                        .child(*label),
+                        .child(label.clone()),
                 )
             })
     }

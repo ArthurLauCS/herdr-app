@@ -4,7 +4,7 @@
 
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, closeOverlay, run, theme } from "herdr";
+import { props, closeOverlay, run, theme, tr } from "herdr";
 
 const DOT = { error: "blocked", warning: "working", success: "done", info: "accent" };
 
@@ -36,14 +36,14 @@ export default class Toast extends View {
         v_flex()
           .flex_1()
           .overflow_hidden()
-          .child(text(login ? `${login[1]} needs a login: run` : p.title ?? "").font_semibold().text_size(13).text_color(t.foreground))
+          .child(text(login ? tr("{name} needs a login: run", { name: login[1] }) : p.title ?? "").font_semibold().text_size(13).text_color(t.foreground))
           .when(!login && Boolean(p.body), (el) => el.child(text(p.body).text_size(12).text_color(t.muted)))
           .when(Boolean(login), (el) => el.child(h_flex().gap(8).items_center()
             .child(div().flex_1().min_w(0).truncate().tooltip(command).text_size(12).text_color(t.muted).child(command))
             .child(div().id("toast-login-copy").flex_none().px(6).py(3).rounded(4).bg(t.raised)
               .text_size(12).text_color(t.foreground).cursor_pointer().hover(s => s.bg(t.hover))
               .on_click((_e, cx) => { cx.stop_propagation(); cx.write_to_clipboard(command); this.copied = true; cx.notify(); })
-              .child(this.copied ? "Copied" : "Copy")))),
+              .child(this.copied ? tr("Copied") : tr("Copy"))))),
       );
   }
 }

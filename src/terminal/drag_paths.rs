@@ -1,5 +1,6 @@
 //! Routing and pasting paths without treating another machine's files as local.
 
+use crate::i18n::tr_key;
 use gpui_shell::DraggedPaths;
 use std::path::PathBuf;
 
@@ -10,10 +11,10 @@ fn validate_paths(paths: impl IntoIterator<Item = impl AsRef<str>>) -> Result<()
         let path = path.as_ref();
         // Even inside shell quotes, a newline becomes Enter in an unbracketed paste.
         if path.is_empty() || path.chars().any(char::is_control) {
-            return Err("Paths containing control characters cannot be pasted safely");
+            return Err(tr_key("Paths containing control characters cannot be pasted safely"));
         }
     }
-    if any { Ok(()) } else { Err("No files were dropped") }
+    if any { Ok(()) } else { Err(tr_key("No files were dropped")) }
 }
 
 pub(super) fn same_machine(paths: &DraggedPaths, target: &str) -> Result<bool, &'static str> {
@@ -21,7 +22,7 @@ pub(super) fn same_machine(paths: &DraggedPaths, target: &str) -> Result<bool, &
     match paths.on.as_deref() {
         None => Ok(false),
         Some(source) if target.split_once('/').map(|(machine, _)| machine) == Some(source) => Ok(true),
-        Some(_) => Err("Drop these files into a terminal on their own machine. Copying from another machine is not supported yet."),
+        Some(_) => Err(tr_key("Drop these files into a terminal on their own machine. Copying from another machine is not supported yet.")),
     }
 }
 
@@ -54,7 +55,7 @@ pub(super) fn quote_paths(paths: impl IntoIterator<Item = String>, target: &str,
 pub(super) fn unavailable(body: &str) {
     crate::mods::request(crate::mods::Request::OpenOverlay {
         id: crate::mods::new_overlay_id(),
-        spec: serde_json::json!({"kind":"toast", "notification":{"title":"File drop unavailable", "body":body, "level":"info"}}),
+        spec: serde_json::json!({"kind":"toast", "notification":{"title":crate::i18n::tr("File drop unavailable"), "body":crate::i18n::tr(body), "level":"info"}}),
     });
 }
 

@@ -5,6 +5,7 @@
 //! anything: keys, mods, menus and agents all run them.
 
 use crate::hc::Core;
+use crate::i18n::{tr, tr_fmt};
 mod floats;
 mod movable;
 mod pane_drag;
@@ -154,7 +155,8 @@ fn launch_failure(record: &Value, output: impl FnOnce() -> String) -> Option<Str
     let output = output();
     let lines = output.lines().filter(|l| !l.trim().is_empty()).collect::<Vec<_>>();
     let tail = lines[lines.len().saturating_sub(5)..].join("\n");
-    Some(if tail.is_empty() { format!("Exit code {code}") } else { format!("Exit code {code}\n{tail}") })
+    let head = tr_fmt("Exit code {code}", &[("code", &code.to_string())]);
+    Some(if tail.is_empty() { head } else { format!("{head}\n{tail}") })
 }
 
 /// The shipped layouts (defaults/layouts): `main` is Herdr's window (spaces
@@ -655,7 +657,7 @@ impl AppWindow {
         w.apply_look(window, cx);
         w.show_layout_notes(window, cx);
         if let (Some(n), false) = (&name, gone.is_empty()) {
-            let note = json!({ "title": format!("{n} needs mods that aren't here"), "body": format!("Showing Herdr instead. Missing: {}. Your {n} layout file is still there.", gone.join(", ")), "level": "info", "timeout": 12000 });
+            let note = json!({ "title": tr_fmt("{name} needs mods that aren't here", &[("name", n)]), "body": tr_fmt("Showing Herdr instead. Missing: {missing}. Your {name} layout file is still there.", &[("missing", &gone.join(", ")), ("name", n)]), "level": "info", "timeout": 12000 });
             w.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": note }), window, cx);
         }
 
@@ -958,6 +960,9 @@ impl AppWindow {
             self.report_layout(&problems.join("; "));
         }
         if settings::set(s) {
+            // The menu bar words follow the language.
+            #[cfg(target_os = "macos")]
+            crate::macos::refresh_menus(cx);
             for term in self.terms.values() {
                 term.view.read(cx).refresh_theme();
             }
@@ -1214,7 +1219,7 @@ impl AppWindow {
     /// What installing layouts kept of the person's own, as toasts.
     fn show_layout_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         for clone in mods::take_sync_notes() {
-            let n = json!({ "title": format!("Your edits are in {clone}"), "body": "Herdr's own layouts and mods can't be changed: clone one to make it yours.", "level": "info", "timeout": 12000 });
+            let n = json!({ "title": tr_fmt("Your edits are in {clone}", &[("clone", &clone)]), "body": tr("Herdr's own layouts and mods can't be changed: clone one to make it yours."), "level": "info", "timeout": 12000 });
             self.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": n }), window, cx);
         }
     }
@@ -2161,7 +2166,7 @@ impl AppWindow {
                     if notify {
                         tracing::warn!("layout on {machine:?} unavailable: {error}");
                         slot.notified_error = Some(error.clone());
-                        self.layout_notice("Layout unavailable", &format!("{}: {error}", if machine.is_empty() { "This machine" } else { &machine }), window, cx);
+                        self.layout_notice(&tr("Layout unavailable"), &format!("{}: {error}", if machine.is_empty() { tr("This machine") } else { machine.clone() }), window, cx);
                     }
                     continue;
                 }
@@ -2178,7 +2183,7 @@ impl AppWindow {
                 changed = true;
             }
             if conflict {
-                self.layout_notice("Layout changed elsewhere", "The other screen's layout is shown.", window, cx);
+                self.layout_notice(&tr("Layout changed elsewhere"), &tr("The other screen's layout is shown."), window, cx);
             }
         }
         if let Some(machines) = machines {
@@ -2260,7 +2265,7 @@ impl AppWindow {
                     Ok(true) => {}
                     Err((name, error)) => {
                         tracing::warn!(mod_name = %name, "link.js: {error}");
-                        this.error_notice(&format!("Link handler {name} failed"), &error, window, cx);
+                        this.error_notice(&tr_fmt("Link handler {name} failed", &[("name", &name)]), &error, window, cx);
                         this.link_errors.insert(name, error);
                     }
                 }
@@ -2377,7 +2382,7 @@ impl AppWindow {
         let name = rec
             .and_then(|r| r.get("name").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned))
             .or_else(|| app.as_deref().map(crate::programs::name))
-            .unwrap_or_else(|| "An agent".into());
+            .unwrap_or_else(|| tr("An agent"));
         // A sub-agent lives where its top agent does.
         let home = self.root_agent(addr);
         let place = self.model.pane_of(&home).and_then(|pane| {
@@ -2385,8 +2390,8 @@ impl AppWindow {
             Some(format!("{} / {}", self.model.space_name(p, &self::home()), Model::tab_name(p, c)))
         });
         let (title, level) = match alert {
-            model::Alert::Blocked => (format!("{name} needs you"), "error"),
-            model::Alert::Done => (format!("{name} finished"), "info"),
+            model::Alert::Blocked => (tr_fmt("{name} needs you", &[("name", &name)]), "error"),
+            model::Alert::Done => (tr_fmt("{name} finished", &[("name", &name)]), "info"),
         };
         let notification = json!({
             "title": title, "body": place, "level": level,
@@ -2611,7 +2616,7 @@ impl AppWindow {
             }).await;
             if let Some(body) = failure {
                 let _ = this.update_in(cx, |this, window, cx| {
-                    this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast", "notification":{"title":"Terminal failed to start", "body":body, "level":"error"}}), window, cx);
+                    this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast", "notification":{"title":tr("Terminal failed to start"), "body":body, "level":"error"}}), window, cx);
                 });
             }
         }).detach();
@@ -2935,7 +2940,7 @@ impl AppWindow {
         self.changing_terminals.remove(&address);
         if let Err(error) = result {
             tracing::error!("terminal change for {address} failed: {error}");
-            if !self.draining { self.layout_notice("Could not change terminal pane", &error, window, cx); }
+            if !self.draining { self.layout_notice(&tr("Could not change terminal pane"), &error, window, cx); }
             return;
         }
         match change {
@@ -3074,7 +3079,7 @@ impl AppWindow {
     }
 
     fn command_error(&mut self, name: &str, error: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let spec = json!({"kind":"toast", "notification":{"title":format!("{name} failed"),"body":error,"level":"error"}});
+        let spec = json!({"kind":"toast", "notification":{"title":tr_fmt("{name} failed", &[("name", name)]),"body":error,"level":"error"}});
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
     }
 
@@ -3208,8 +3213,8 @@ impl AppWindow {
                         return self.fail("space.close ends its terminals: pass confirmed: true");
                     }
                     let panes: usize = p.tabs.iter().map(|c| c.root.panes().len()).sum();
-                    let detail = format!("{} \u{2014} {} tabs, {} terminals", self.model.space_name(p, &home()), p.tabs.len(), panes);
-                    self.confirm("Close space?", &detail, "space.close", json!({ "id": id, "confirmed": true }), window, cx);
+                    let detail = tr_fmt("{name} — {tabs} tabs, {terminals} terminals", &[("name", &self.model.space_name(p, &home())), ("tabs", &p.tabs.len().to_string()), ("terminals", &panes.to_string())]);
+                    self.confirm(&tr("Close space?"), &detail, "space.close", json!({ "id": id, "confirmed": true }), window, cx);
                     return;
                 }
                 let addrs = self.model.remove_space(&id);
@@ -4704,7 +4709,7 @@ impl AppWindow {
                     .items_center()
                     .justify_center()
                     .text_color(c("dim"))
-                    .child("no agents yet. start claude, codex or pi in a terminal")
+                    .child(tr("no agents yet. start claude, codex or pi in a terminal"))
                     .into_any_element(),
             },
             Content::Context { .. } => match self.model.active_tab() {
@@ -4718,7 +4723,7 @@ impl AppWindow {
                         .items_center()
                         .justify_center()
                         .text_color(c("dim"))
-                        .child(format!("No space open. Make one{}.", key.unwrap_or_default()))
+                        .child(tr_fmt("No space open. Make one{key}.", &[("key", &key.unwrap_or_default())]))
                         .into_any_element()
                 }
             },
@@ -4767,7 +4772,7 @@ impl AppWindow {
                 .text_xs()
                 .text_color(c("blocked"))
                 .overflow_y_scroll()
-                .child(format!("{} did not load:\n\n{}\n\nFix the files; Herdr retries on save.", inst.name, error.as_deref().unwrap_or("?")))
+                .child(tr_fmt("{name} did not load:\n\n{error}\n\nFix the files; Herdr retries on save.", &[("name", &inst.name), ("error", error.as_deref().unwrap_or("?"))]))
                 .into_any_element(),
             None => div().into_any_element(),
         }
@@ -4986,7 +4991,7 @@ impl AppWindow {
                 .occlude().flex().items_center().gap(settings::z(8.0))
                 .child(div().id("core-update-error").flex_1().min_w_0().cursor_pointer()
                     .on_click(cx.listener(|this, _, w, cx| this.run("app.settings", json!({ "section": "updates" }), w, cx)))
-                    .child(format!("herdr-core update failed: {error} · Open Updates")))
+                    .child(tr_fmt("herdr-core update failed: {error} · Open Updates", &[("error", &error)])))
                 .child(div().id("core-update-error-dismiss").size(settings::z(24.0)).flex_none()
                     .flex().items_center().justify_center().rounded_full().cursor_pointer()
                     .text_color(c("dim")).hover(|s| s.bg(c("raised")).text_color(c("foreground"))).child("×")
@@ -5107,9 +5112,9 @@ impl AppWindow {
         let core = crate::update::core();
         let core = core.ready.filter(|_| !core.updating && core.managed.is_none());
         match (crate::update::ready(), core) {
-            (Some(a), Some(c)) => Some(format!("Herdr {a} and herdr-core {c} are ready")),
-            (Some(a), None) => Some(format!("Herdr {a} is ready")),
-            (None, Some(c)) => Some(format!("herdr-core {c} is ready")),
+            (Some(a), Some(c)) => Some(tr_fmt("Herdr {app} and herdr-core {core} are ready", &[("app", &a), ("core", &c)])),
+            (Some(a), None) => Some(tr_fmt("Herdr {app} is ready", &[("app", &a)])),
+            (None, Some(c)) => Some(tr_fmt("herdr-core {core} is ready", &[("core", &c)])),
             (None, None) => None,
         }
     }
@@ -5118,7 +5123,7 @@ impl AppWindow {
         let app_version = crate::update::ready();
         let app_ready = app_version.is_some();
         let success = self.update_ready.is_none() && self.update_success;
-        let label = self.update_ready.clone().or_else(|| success.then(|| format!("Updated to {}", env!("CARGO_PKG_VERSION"))))?;
+        let label = self.update_ready.clone().or_else(|| success.then(|| tr_fmt("Updated to {version}", &[("version", env!("CARGO_PKG_VERSION"))])))?;
         let dismissal = app_version.map(|v| format!("app:{v}")).unwrap_or_else(|| label.clone());
         if self.update_dismissed.as_ref() == Some(&dismissal) { return None; }
         let pill = div()
@@ -5150,11 +5155,11 @@ impl AppWindow {
                     .text_color(c("accent_foreground"))
                     .font_weight(FontWeight::SEMIBOLD)
                     .hover(|s| s.opacity(0.9))
-                    .child("Restart")
+                    .child(tr("Restart"))
                     .on_click(cx.listener(|this, _, w, cx| this.run("app.update", json!({}), w, cx))),
             ))
             .child(div().id("update-notes").px(settings::z(6.0)).cursor_pointer().text_color(c("accent"))
-                .child(if app_ready || success { "What changed" } else { "Open Updates" })
+                .child(if app_ready || success { tr("What changed") } else { tr("Open Updates") })
                 .on_click(cx.listener(move |this, _, w, cx| {
                     if success { this.update_success = false; }
                     this.run("app.settings", json!({ "section": "updates" }), w, cx);
@@ -5636,7 +5641,7 @@ impl Render for AppWindow {
                         }
                         this.run_key(&name, args, w, cx);
                     }
-                    Err(error) => this.command_error("Key binding", &error, w, cx),
+                    Err(error) => this.command_error(&tr("Key binding"), &error, w, cx),
                 }
             }))
             // Ctrl (Cmd) alone shows links in the pane under the pointer, focused or not.

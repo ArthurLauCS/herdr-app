@@ -77,7 +77,7 @@ first frame or during GPU recovery it reports an error instead of a PNG.
 |---|---|---|
 | `layouts/<name>.json` | the window and its whole look: blocks, theme, fonts, backgrounds, pane frames; one file per layout (`main`, `terminals`, `win98`, any you add) | live |
 | `keys.json` | what every key does | live |
-| `settings.json` | the person: zoom, sounds, fonts for every layout, worktree directory | live |
+| `settings.json` | the person: zoom, sounds, language, fonts for every layout, worktree directory | live |
 | `mods/<name>/` | panels: small JavaScript programs | live (hot reload) |
 | `programs.json` | how programs show (name, icon, tile), on top of the built-in table | live |
 | `icons/` | the shipped program icons | written by Herdr (put your own elsewhere) |
@@ -864,6 +864,11 @@ What's about the user, never a look:
   pane's right edge (default `true`). It shows only when the pane has
   scrollback — never on the alternate screen (editors, pagers) — and
   drags to move through it.
+- `language`: the interface language: `"auto"` (default: the system's UI language),
+  `"en"` or `"zh-CN"` (Simplified Chinese). Anything else shows English. Applies live:
+  Settings > Look > Language writes it. Texts come from catalogs keyed by the English
+  text (`locales/<code>.json` in Herdr's source); a text without an entry stays English.
+  Mods translate their own text with `tr()` (see The `herdr` module).
 - `telemetry`: `false` stops anonymous usage data and deletes what wasn't
   sent (on when absent; Settings → Privacy shows each report word for
   word, and `telemetry()` in mods). Once a day the app sends counts:
@@ -1160,6 +1165,10 @@ All of it is in `herdr.d.ts`. In short:
   `panes()` still lists only model panes; none is focused while a terminal block is.
   For composition navigation: `run("pane.focus", {terminal: nextAddress})`.
   Terminal copy/paste and implicit right-click routing follow the focused block.
+- Language: `tr("Save")`, `tr("{name} needs you", { name })` returns the text in the
+  interface language (`settings.json` `language`); the English text is the key and what
+  shows when the language has no entry. Wrap text where it is drawn (in `render`), not at
+  load, so a language change shows live. Your own mods can keep their text as it is.
 - Floating: `placement()` (null unless this copy floats).
 - Act: `run(command, args)`.
 - Overlays: `openOverlay({ mod, props, kind: "dialog" | "popup" | "window", width, height, at, frame })`

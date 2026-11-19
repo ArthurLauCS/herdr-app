@@ -29,6 +29,7 @@ const values: Record<string, any> = {
   Input: { new: element }, InputState: { new: () => ({ handlers: {} as Record<string, any>, on(name: string, handler: any) { this.handlers[name] = handler; }, focus() {} }) },
   agents: () => [], spaces: () => testSpaces, terminals: () => [], theme: () => ({ hover: "hover" }),
   settings: () => ({ zoom: 1.2 }), props: () => ({}), shared: () => ({}),
+    tr: (s: string, v?: Record<string, any>) => Object.entries(v ?? {}).reduce((a, [k, x]) => a.split("{" + k + "}").join(String(x)), s),
   setShared() {}, closeOverlay() { closed++; }, openOverlay() {}, run(...args: unknown[]) { commands.push(args); }, hc() {},
 };
 const Picker = new Function(...Object.keys(values), source.replace(/^import .*;\n/gm, "").replace("export default class Picker", "return class Picker"))(...Object.values(values));

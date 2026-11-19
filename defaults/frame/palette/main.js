@@ -7,7 +7,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { commands, layouts, keys, run, theme, themes, settings, props, closeOverlay, openOverlay, shared, window as win } from "herdr";
+import { commands, layouts, keys, run, theme, themes, settings, props, closeOverlay, openOverlay, shared, window as win, tr } from "herdr";
 
 // The list keeps one height while you move: rows and group titles have fixed
 // heights, and the window shows as many as fit in LIST_H.
@@ -20,45 +20,45 @@ const LIST_H = SHOWN * ROW_H;
 const GROUPS = ["Recent", "Tab", "Pane", "Space", "Layout", "Terminal", "Agent", "Window", "App"];
 
 // The palette's names for commands: [command, args, group, title, keywords].
-const NAMED = [
-  ["tab.new", {}, "Tab", "New tab", "tab agent new task"],
-  ["mod.open", { name: "picker" }, "Tab", "Go to space or tab…", "switch jump find"],
-  ["tab.rename", {}, "Tab", "Rename tab", "tab"],
-  ["tab.close", {}, "Tab", "Close tab", "tab kill"],
-  ["tab.next", {}, "Tab", "Next tab", "tab"],
-  ["tab.prev", {}, "Tab", "Previous tab", "tab"],
-  ["pane.split", { direction: "right" }, "Pane", "Split right", "vertical"],
-  ["pane.split", { direction: "down" }, "Pane", "Split down", "horizontal"],
-  ["pane.close", {}, "Pane", "Close pane", "kill"],
-  ["pane.zoom", {}, "Pane", "Zoom pane", "maximize fullscreen"],
-  ...["left", "right", "up", "down"].map((d) => ["pane.go", { direction: d }, "Pane", `Focus pane ${d}`, "move go"]),
-  ...["left", "right", "up", "down"].map((d) => ["pane.swap", { direction: d }, "Pane", `Swap pane ${d}`, "move"]),
-  ["space.new", {}, "Space", "New space", "workspace"],
-  ["space.rename", {}, "Space", "Rename space", "workspace"],
-  ["space.close", {}, "Space", "Close space", "workspace kill"],
-  ["space.next", {}, "Space", "Next space", "workspace"],
-  ["space.prev", {}, "Space", "Previous space", "workspace"],
-  ["layout.switch", {}, "Layout", "Next layout", "look switch"],
-  ["layout.reset", {}, "Layout", "Reset layout", "new version default restore herdr's"],
-  ["layout.clone", {}, "Layout", "Duplicate layout", "clone copy customize"],
-  ["mod.clone", {}, "Layout", "Duplicate mod", "clone copy customize"],
-  ["terminal.open", {}, "Terminal", "New terminal", "shell"],
-  ["terminal.copy", {}, "Terminal", "Copy", "clipboard"],
-  ["terminal.paste", {}, "Terminal", "Paste", "clipboard"],
-  ["agent.next", {}, "Agent", "Next agent", ""],
-  ["agent.prev", {}, "Agent", "Previous agent", ""],
-  ["window.minimize", {}, "Window", "Minimize window", ""],
-  ["window.maximize", {}, "Window", "Maximize window", "restore"],
-  ["window.close", {}, "Window", "Close window", "quit"],
-  ["app.settings", {}, "App", "Settings", "preferences options config look font theme sound"],
-  ["app.help", {}, "App", "Keys", "keybindings shortcuts help"],
-  ["app.welcome", {}, "App", "Welcome", "intro start onboarding"],
-  ["app.whats_new", {}, "App", "What's new", "release changes news update"],
-  ["app.reset", {}, "App", "Reset to the default screen", "escape hatch broken restore"],
-  ["app.zoom_in", {}, "App", "Zoom in", "bigger font size"],
-  ["app.zoom_out", {}, "App", "Zoom out", "smaller font size"],
-  ["app.zoom_reset", {}, "App", "Reset zoom", "font size"],
-  ["app.quit", {}, "App", "Quit Herdr", "exit"],
+const named = () => [
+  ["tab.new", {}, "Tab", tr("New tab"), "tab agent new task"],
+  ["mod.open", { name: "picker" }, "Tab", tr("Go to space or tab…"), "switch jump find"],
+  ["tab.rename", {}, "Tab", tr("Rename tab"), "tab"],
+  ["tab.close", {}, "Tab", tr("Close tab"), "tab kill"],
+  ["tab.next", {}, "Tab", tr("Next tab"), "tab"],
+  ["tab.prev", {}, "Tab", tr("Previous tab"), "tab"],
+  ["pane.split", { direction: "right" }, "Pane", tr("Split right"), "vertical"],
+  ["pane.split", { direction: "down" }, "Pane", tr("Split down"), "horizontal"],
+  ["pane.close", {}, "Pane", tr("Close pane"), "kill"],
+  ["pane.zoom", {}, "Pane", tr("Zoom pane"), "maximize fullscreen"],
+  ...["left", "right", "up", "down"].map((d) => ["pane.go", { direction: d }, "Pane", tr("Focus pane {direction}", { direction: tr(d) }), "move go"]),
+  ...["left", "right", "up", "down"].map((d) => ["pane.swap", { direction: d }, "Pane", tr("Swap pane {direction}", { direction: tr(d) }), "move"]),
+  ["space.new", {}, "Space", tr("New space"), "workspace"],
+  ["space.rename", {}, "Space", tr("Rename space"), "workspace"],
+  ["space.close", {}, "Space", tr("Close space"), "workspace kill"],
+  ["space.next", {}, "Space", tr("Next space"), "workspace"],
+  ["space.prev", {}, "Space", tr("Previous space"), "workspace"],
+  ["layout.switch", {}, "Layout", tr("Next layout"), "look switch"],
+  ["layout.reset", {}, "Layout", tr("Reset layout"), "new version default restore herdr's"],
+  ["layout.clone", {}, "Layout", tr("Duplicate layout"), "clone copy customize"],
+  ["mod.clone", {}, "Layout", tr("Duplicate mod"), "clone copy customize"],
+  ["terminal.open", {}, "Terminal", tr("New terminal"), "shell"],
+  ["terminal.copy", {}, "Terminal", tr("Copy"), "clipboard"],
+  ["terminal.paste", {}, "Terminal", tr("Paste"), "clipboard"],
+  ["agent.next", {}, "Agent", tr("Next agent"), ""],
+  ["agent.prev", {}, "Agent", tr("Previous agent"), ""],
+  ["window.minimize", {}, "Window", tr("Minimize window"), ""],
+  ["window.maximize", {}, "Window", tr("Maximize window"), "restore"],
+  ["window.close", {}, "Window", tr("Close window"), "quit"],
+  ["app.settings", {}, "App", tr("Settings"), "preferences options config look font theme sound"],
+  ["app.help", {}, "App", tr("Keys"), "keybindings shortcuts help"],
+  ["app.welcome", {}, "App", tr("Welcome"), "intro start onboarding"],
+  ["app.whats_new", {}, "App", tr("What's new"), "release changes news update"],
+  ["app.reset", {}, "App", tr("Reset to the default screen"), "escape hatch broken restore"],
+  ["app.zoom_in", {}, "App", tr("Zoom in"), "bigger font size"],
+  ["app.zoom_out", {}, "App", tr("Zoom out"), "smaller font size"],
+  ["app.zoom_reset", {}, "App", tr("Reset zoom"), "font size"],
+  ["app.quit", {}, "App", tr("Quit Herdr"), "exit"],
 ];
 
 // Commands that act on something you point at (ids, terminals): not for a list.
@@ -70,22 +70,41 @@ const HIDDEN = new Set([
   "app.palette", "app.hide", "app.hide_others", "app.show_all", "app.theme", "app.settings",
 ]);
 
+// The group as shown (entries keep the English name to group and compare by).
+const groupName = (g) =>
+  ({ Recent: tr("Recent"), Tab: tr("Tab"), Pane: tr("Pane"), Space: tr("Space"), Layout: tr("Layout"), Terminal: tr("Terminal"), Agent: tr("Agent"), Window: tr("Window"), App: tr("App") })[g] ?? g;
+
+// The titles titleOf makes for commands the palette doesn't name above, translated by what it makes.
+const generated = () => ({
+  "terminal.select_all": tr("Select all terminal"),
+  "terminal.select": tr("Select terminal"),
+  "terminal.clear_selection": tr("Clear selection terminal"),
+  "terminal.search": tr("Search terminal"),
+  "terminal.paste_image": tr("Paste image terminal"),
+  "terminal.scroll": tr("Scroll terminal"),
+  "pane.rename": tr("Rename pane"),
+  "app.feedback": tr("Feedback app"),
+  "app.check_updates": tr("Check updates app"),
+  "app.update_core": tr("Update core app"),
+  "app.update": tr("Update app"),
+});
+
 function titleOf(name) {
   const [noun, verb] = name.split(".");
-  return { group: noun.charAt(0).toUpperCase() + noun.slice(1), title: `${verb.replace(/_/g, " ")} ${noun}`.replace(/^./, (c) => c.toUpperCase()) };
+  return { group: noun.charAt(0).toUpperCase() + noun.slice(1), title: generated()[name] ?? `${verb.replace(/_/g, " ")} ${noun}`.replace(/^./, (c) => c.toUpperCase()) };
 }
 
 // Every entry for the state we're in now.
 function entries() {
   const known = new Set(commands().map((c) => c.name));
   const mac = win()?.platform === "macos";
-  const list = NAMED.filter(([n]) => known.has(n))
+  const list = named().filter(([n]) => known.has(n))
     .filter(([n]) => !(mac && n.startsWith("window.")))
     .map(([name, args, group, title, words]) => ({ name, args, group, title, words }));
   const shown = layouts();
   for (const l of shown) {
     const t = { main: "Herdr", terminals: "Terminals", win98: "Herdr 98" }[l] ?? l.charAt(0).toUpperCase() + l.slice(1);
-    list.push({ name: "layout.switch", args: { name: l }, group: "Layout", title: `Layout: ${t}`, words: `look ${l}` });
+    list.push({ name: "layout.switch", args: { name: l }, group: "Layout", title: tr("Layout: {name}", { name: t }), words: `look ${l}` });
   }
   // `app.theme` sets the half of its theme's lightness, so only the themes
   // that can show now are offered: dark ones in a dark window, light ones in a
@@ -93,12 +112,12 @@ function entries() {
   const dark = Boolean(settings().dark);
   for (const { name, light } of themes()) {
     if (Boolean(light) === dark || (name !== shared("layout") && shown.includes(name))) continue;
-    list.push({ name: "app.theme", args: { name }, group: "App", title: `Theme: ${name.replace(/-/g, " ")}`, words: "colors look" });
+    list.push({ name: "app.theme", args: { name }, group: "App", title: tr("Theme: {name}", { name: name.replace(/-/g, " ") }), words: "colors look" });
   }
   // Anything new in the app shows up too, until it gets a better name here.
-  const named = new Set(NAMED.map(([n]) => n));
+  const have = new Set(named().map(([n]) => n));
   for (const c of commands()) {
-    if (named.has(c.name) || HIDDEN.has(c.name) || c.args.some((a) => a.required && a.name !== "name")) continue;
+    if (have.has(c.name) || HIDDEN.has(c.name) || c.args.some((a) => a.required && a.name !== "name")) continue;
     list.push({ name: c.name, args: {}, ...titleOf(c.name), words: c.about });
   }
   return list.map((e) => ({ ...e, id: `${e.name}:${JSON.stringify(e.args)}` }));
@@ -139,7 +158,7 @@ function fuzzy(q, text) {
 export default class Palette extends View {
   init(_props, cx) {
     this.query = "";
-    this.input = InputState.new({ placeholder: "Type a command…" });
+    this.input = InputState.new({ placeholder: tr("Type a command…") });
     this.input.on("change", (_e, cx) => { this.query = this.input.value(); this.at = 0; cx.notify(); });
     this.input.on("submit", () => this.go(this.rows()[this.at]?.e));
     this.input.focus();
@@ -162,7 +181,7 @@ export default class Palette extends View {
     this.close();
     if (e.name === "mod.clone") {
       openOverlay({ mod: "prompt", kind: "dialog", width: 380, props: {
-        title: "Duplicate mod", hint: "Mod to copy; creates <name>-copy",
+        title: tr("Duplicate mod"), hint: tr("Mod to copy; creates <name>-copy"),
         command: { name: "mod.clone", args: {} },
       } });
     } else {
@@ -184,7 +203,7 @@ export default class Palette extends View {
     return all
       .map((e) => {
         const title = fuzzy(q, e.title);
-        const more = fuzzy(q, `${e.group} ${e.title} ${e.name} ${e.words}`);
+        const more = fuzzy(q, `${groupName(e.group)} ${e.group} ${e.title} ${e.name} ${e.words}`);
         const best = title ?? (more && { score: more.score - 4, hits: [] });
         return best && { e, score: best.score, hits: best.hits };
       })
@@ -249,7 +268,7 @@ export default class Palette extends View {
     const list = [];
     rows.forEach((r, i) => {
       const { head, title, row } = tops[i];
-      if (head && visible(title, row)) list.push(place(h_flex(), title, row).px(14).pb(4).items_end().text_size(11).font_semibold().text_color(t.dim).child(r.head));
+      if (head && visible(title, row)) list.push(place(h_flex(), title, row).px(14).pb(4).items_end().text_size(11).font_semibold().text_color(t.dim).child(groupName(r.head)));
       if (!visible(row, row + ROW_H)) return;
       const on = i === this.at;
       const k = keyOf(r.e, bound);
@@ -267,7 +286,7 @@ export default class Palette extends View {
           .hover((s) => s.bg(t.hover))
           .on_click(() => this.go(r.e))
           .child(div().flex_1().min_w(0).child(this.title(t, r.e.title, r.hits, on)))
-          .when(Boolean(this.query), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(r.e.group)))
+          .when(Boolean(this.query), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(groupName(r.e.group))))
           .when(Boolean(k), (el) => el.child(key(k))),
       );
     });
@@ -323,7 +342,7 @@ export default class Palette extends View {
                 cx.notify();
               })
               .children(fixed ? list : [v_flex().children(list)])
-          : div().px(16).py(14).text_size(13).text_color(t.dim).child(`Nothing matches "${this.query}". Places are in the picker.`),
+          : div().px(16).py(14).text_size(13).text_color(t.dim).child(tr("Nothing matches \"{query}\". Places are in the picker.", { query: this.query })),
       );
   }
 }

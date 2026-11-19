@@ -189,6 +189,7 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
             &json!({"available":true,"body":{"message":a.string(0)?,"email":a.string(1)?}}),
         ))
     });
+    module = module.function("tr", |a| Ok(super::translate(a.string(0)?, a.get(1).map(from_host).unwrap_or(Value::Null)).into()));
     let shared = calls.clone();
     module = module.function("shared", move |a| {
         Ok(shared.borrow().shared.get(a.string(0)?).map(to_host).unwrap_or(HostValue::Null))

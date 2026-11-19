@@ -40,6 +40,7 @@ function harness(focusedMachine: string | null = null, raw: string | null = null
     View: class {}, div: element, v_flex: element, h_flex: element,
     Input: { new: element }, Scrollbar: { vertical: element }, theme: () => ({}),
     appHome: () => "/app", readTextFile: async () => raw,
+    tr: (s: string, v?: Record<string, any>) => Object.entries(v ?? {}).reduce((a, [k, x]) => a.split("{" + k + "}").join(String(x)), s),
     spaces: () => { reads.spaces++; return structuredClone(spaceList); },
     panes: () => { reads.panes++; return structuredClone(paneList); },
     props: () => ({ overlay: "overlay" }), closeOverlay: () => {},
