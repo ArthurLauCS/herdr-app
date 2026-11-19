@@ -15,6 +15,7 @@ mod keys;
 mod layout;
 mod layout_sync;
 mod links;
+mod local_custom;
 mod model;
 mod mirror;
 mod mirror_sync;
@@ -179,6 +180,8 @@ fn main() {
         update::after_update(core.clone());
     }
     update::start();
+    // LOCAL PATCH: the custom build's daily sync (local_custom.rs).
+    local_custom::start();
     telemetry::start(settings::telemetry_setting(&person));
     bench::start();
     if let Err(e) = mods::write_workspace() {
